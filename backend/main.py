@@ -1,0 +1,1173 @@
+from fastapi import FastAPI
+from fastapi import Depends
+from fastapi import HTTPException
+
+from fastapi.middleware.cors import CORSMiddleware
+
+from pydantic import BaseModel
+
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+
+from database import engine
+from database import SessionLocal
+from database import Base
+
+from models import Complaint
+from models import City
+from models import Department
+from models import IssueCategory
+from models import ComplaintHistory
+from models import Officer
+
+from datetime import datetime
+
+
+# Create database tables
+Base.metadata.create_all(
+    bind=engine
+)
+
+
+app = FastAPI(
+    title="CivicResolve API",
+    description="Government Civic Issue Management System",
+    version="1.0.0"
+)
+
+
+# Allow React frontend to communicate with FastAPI
+app.add_middleware(
+
+    CORSMiddleware,
+
+    allow_origins=[
+        "http://localhost:5173"
+    ],
+
+    allow_credentials=True,
+
+    allow_methods=["*"],
+
+    allow_headers=["*"]
+)
+
+
+class ComplaintCreate(BaseModel):
+
+    city_id: int
+
+    category_id: int
+
+    title: str
+
+    description: str
+
+
+def get_db():
+
+    db = SessionLocal()
+
+    try:
+
+        yield db
+
+    finally:
+
+        db.close()
+
+
+@app.get("/")
+def home():
+
+    return {
+        "message": "CivicResolve backend is running!"
+    }
+
+
+@app.post("/complaints")
+def create_complaint(
+
+    complaint: ComplaintCreate,
+
+    db: Session = Depends(get_db)
+
+):
+
+    # Check city
+    city = (
+        db.query(City)
+        .filter(
+            City.id == complaint.city_id
+        )
+        .first()
+    )
+
+    if not city:
+
+        return {
+            "success": False,
+            "message": "Invalid city."
+        }
+
+    # Check issue category
+    category = (
+        db.query(IssueCategory)
+        .filter(
+            IssueCategory.id ==
+            complaint.category_id
+        )
+        .first()
+    )
+
+    if not category:
+
+        return {
+            "success": False,
+            "message": "Invalid issue category."
+        }
+
+    department_id = category.department_id
+
+    complaint_id = (
+        "CR-"
+        + datetime.now().strftime(
+            "%Y%m%d%H%M%S"
+        )
+    )
+
+
+    new_complaint = Complaint(
+
+        complaint_id=complaint_id,
+
+        city_id=complaint.city_id,
+
+        department_id=department_id,
+
+        category_id=complaint.category_id,
+
+        title=complaint.title,
+
+        description=complaint.description,
+
+        status="Submitted"
+
+    )
+
+
+    db.add(
+        new_complaint
+    )
+
+    db.commit()
+
+    db.refresh(
+        new_complaint
+    )
+
+    history = ComplaintHistory(
+
+        complaint_id=new_complaint.id,
+
+        old_status=None,
+
+        new_status="Submitted",
+
+        remarks="Complaint submitted by citizen.",
+
+        changed_by="Citizen"
+
+    )
+
+    db.add(history)
+
+    db.commit()
+
+
+    return {
+
+        "success": True,
+
+        "complaint_id":
+            new_complaint.complaint_id,
+
+        "city":
+            city.name,
+
+        "category":
+            category.name,
+
+        "department_id":
+            department_id,
+
+        "message":
+            "Complaint submitted successfully!",
+
+        "status":
+            new_complaint.status
+
+    }
+
+
+@app.get("/complaints")
+def get_complaints(
+
+    db: Session = Depends(get_db)
+
+):
+
+    complaints = (
+        db.query(Complaint)
+        .all()
+    )
+
+
+    return complaints
+
+@app.get("/cities")
+def get_cities(
+    db: Session = Depends(get_db)
+):
+
+    cities = (
+        db.query(City)
+        .filter(City.is_active == "true")
+        .all()
+    )
+
+    return cities
+
+
+
+class CityCreate(BaseModel):
+
+    name: str
+
+    state: str
+
+
+
+@app.post("/cities")
+def create_city(
+
+    city: CityCreate,
+
+    db: Session = Depends(get_db)
+
+):
+
+    existing_city = (
+        db.query(City)
+        .filter(City.name == city.name)
+        .first()
+    )
+
+    if existing_city:
+
+        raise HTTPException(
+            status_code=409,
+            detail=f"City '{city.name}' already exists."
+        )
+
+    new_city = City(
+
+        name=city.name,
+
+        state=city.state,
+
+        is_active="true"
+
+    )
+
+    db.add(new_city)
+
+    try:
+
+        db.commit()
+
+    except IntegrityError:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail=f"City '{city.name}' already exists."
+        )
+
+    db.refresh(new_city)
+
+    return {
+
+        "success": True,
+
+        "city": new_city
+
+    }
+
+@app.get("/departments")
+def get_departments(
+
+    db: Session = Depends(get_db)
+
+):
+
+    departments = (
+        db.query(Department)
+        .filter(
+            Department.is_active == "true"
+        )
+        .all()
+    )
+
+    return departments
+
+@app.get("/categories")
+def get_categories(
+
+    db: Session = Depends(get_db)
+
+):
+
+    categories = (
+        db.query(IssueCategory)
+        .filter(
+            IssueCategory.is_active == "true"
+        )
+        .all()
+    )
+
+    return categories
+
+
+@app.get("/complaints/{complaint_id}")
+def get_complaint(
+    complaint_id: str,
+    db: Session = Depends(get_db)
+):
+
+    complaint = (
+        db.query(Complaint)
+        .filter(
+            Complaint.complaint_id == complaint_id
+        )
+        .first()
+    )
+
+    if not complaint:
+
+        return {
+            "success": False,
+            "message": "Complaint not found."
+        }
+
+    return {
+        "success": True,
+
+        "complaint_id":
+            complaint.complaint_id,
+
+        "city":
+            complaint.city.name,
+
+        "city_id":
+            complaint.city_id,
+
+        "category":
+            complaint.category.name,
+
+        "category_id":
+            complaint.category_id,
+
+        "department":
+            complaint.department.name,
+
+        "department_id":
+            complaint.department_id,
+
+        "officer":
+            complaint.officer.name
+            if complaint.officer
+            else None,
+
+        "officer_id":
+            complaint.officer.officer_id
+            if complaint.officer
+            else None,
+
+        "title":
+            complaint.title,
+
+        "description":
+            complaint.description,
+
+        "status":
+            complaint.status,
+
+        "created_at":
+            complaint.created_at
+    }
+
+
+class StatusUpdate(BaseModel):
+
+    status: str
+
+    remarks: str | None = None
+
+
+@app.put("/complaints/{complaint_id}/status")
+def update_complaint_status(
+
+    complaint_id: str,
+
+    status_update: StatusUpdate,
+
+    db: Session = Depends(get_db)
+
+):
+
+    complaint = (
+        db.query(Complaint)
+        .filter(
+            Complaint.complaint_id ==
+            complaint_id
+        )
+        .first()
+    )
+
+    if not complaint:
+
+        return {
+            "success": False,
+            "message": "Complaint not found."
+        }
+
+    allowed_statuses = [
+
+        "Submitted",
+        "Under Review",
+        "Assigned",
+        "In Progress",
+        "Resolved",
+        "Rejected"
+
+    ]
+
+    if status_update.status not in allowed_statuses:
+
+        return {
+
+            "success": False,
+
+            "message":
+                "Invalid complaint status."
+
+        }
+
+    old_status = complaint.status
+
+    new_status = status_update.status
+
+    complaint.status = new_status
+
+    remarks = (
+        status_update.remarks
+        if status_update.remarks
+        else
+        f"Complaint status changed from "
+        f"{old_status} to {new_status}."
+    )
+
+    history = ComplaintHistory(
+
+        complaint_id=complaint.id,
+
+        old_status=old_status,
+
+        new_status=new_status,
+
+        remarks=remarks,
+
+        changed_by="Department Officer"
+
+    )
+
+    db.add(history)
+
+    db.commit()
+
+    db.refresh(complaint)
+
+    return {
+
+        "success": True,
+
+        "message":
+            "Complaint updated successfully.",
+
+        "complaint_id":
+            complaint.complaint_id,
+
+        "status":
+            complaint.status,
+
+        "remarks":
+            remarks
+
+    }
+
+
+@app.get("/complaints/{complaint_id}/history")
+def get_complaint_history(
+
+    complaint_id: str,
+
+    db: Session = Depends(get_db)
+
+):
+
+    complaint = (
+        db.query(Complaint)
+        .filter(
+            Complaint.complaint_id ==
+            complaint_id
+        )
+        .first()
+    )
+
+
+    if not complaint:
+
+        return {
+
+            "success": False,
+
+            "message":
+                "Complaint not found."
+
+        }
+
+
+    history = (
+        db.query(ComplaintHistory)
+        .filter(
+            ComplaintHistory.complaint_id ==
+            complaint.id
+        )
+        .order_by(
+            ComplaintHistory.created_at.asc()
+        )
+        .all()
+    )
+
+
+    return {
+
+        "success": True,
+
+        "history": [
+
+            {
+
+                "old_status":
+                    item.old_status,
+
+                "new_status":
+                    item.new_status,
+
+                "remarks":
+                    item.remarks,
+
+                "changed_by":
+                    item.changed_by,
+
+                "created_at":
+                    item.created_at
+
+            }
+
+            for item in history
+
+        ]
+
+    }
+
+
+@app.get("/officers")
+def get_officers(
+    db: Session = Depends(get_db)
+):
+
+    officers = (
+        db.query(Officer)
+        .filter(
+            Officer.is_active == "true"
+        )
+        .all()
+    )
+
+    return [
+        {
+            "id": officer.id,
+            "officer_id": officer.officer_id,
+            "name": officer.name,
+            "email": officer.email,
+            "department_id": officer.department_id,
+            "city_id": officer.city_id
+        }
+
+        for officer in officers
+    ]
+
+
+class OfficerAssignment(BaseModel):
+    officer_id: int
+
+
+@app.put("/complaints/{complaint_id}/assign")
+def assign_officer(
+    complaint_id: str,
+    assignment: OfficerAssignment,
+    db: Session = Depends(get_db)
+):
+
+    complaint = (
+        db.query(Complaint)
+        .filter(
+            Complaint.complaint_id == complaint_id
+        )
+        .first()
+    )
+
+    if not complaint:
+        return {
+            "success": False,
+            "message": "Complaint not found."
+        }
+
+    officer = (
+        db.query(Officer)
+        .filter(
+            Officer.id == assignment.officer_id,
+            Officer.is_active == "true"
+        )
+        .first()
+    )
+
+    if not officer:
+        return {
+            "success": False,
+            "message": "Officer not found."
+        }
+
+    if officer.department_id != complaint.department_id:
+        return {
+            "success": False,
+            "message":
+                "Officer does not belong to this department."
+        }
+
+    if officer.city_id != complaint.city_id:
+        return {
+            "success": False,
+            "message":
+                "Officer does not belong to this city."
+        }
+
+    complaint.officer_id = officer.id
+
+    old_status = complaint.status
+
+    complaint.status = "Assigned"
+
+    history = ComplaintHistory(
+        complaint_id=complaint.id,
+        old_status=old_status,
+        new_status="Assigned",
+        remarks=f"Complaint assigned to {officer.name}.",
+        changed_by=officer.name
+    )
+
+    db.add(history)
+
+    db.commit()
+
+    db.refresh(complaint)
+
+    return {
+        "success": True,
+        "message": "Officer assigned successfully.",
+        "complaint_id": complaint.complaint_id,
+        "officer_id": officer.officer_id,
+        "officer_name": officer.name,
+        "status": complaint.status
+    }
+
+
+@app.get("/officers/{officer_id}/complaints")
+def get_officer_complaints(
+    officer_id: int,
+    db: Session = Depends(get_db)
+):
+
+    officer = (
+        db.query(Officer)
+        .filter(Officer.id == officer_id)
+        .first()
+    )
+
+    if not officer:
+        return {
+            "success": False,
+            "message": "Officer not found."
+        }
+
+    complaints = (
+        db.query(Complaint)
+        .filter(
+            Complaint.officer_id == officer_id
+        )
+        .order_by(
+            Complaint.created_at.desc()
+        )
+        .all()
+    )
+
+    return {
+        "success": True,
+
+        "officer": {
+            "id": officer.id,
+            "officer_id": officer.officer_id,
+            "name": officer.name,
+            "email": officer.email
+        },
+
+        "complaints": [
+
+            {
+                "id": complaint.id,
+                "complaint_id":
+                    complaint.complaint_id,
+
+                "title":
+                    complaint.title,
+
+                "description":
+                    complaint.description,
+
+                "status":
+                    complaint.status,
+
+                "city":
+                    complaint.city.name,
+
+                "category":
+                    complaint.category.name,
+
+                "department":
+                    complaint.department.name,
+
+                "created_at":
+                    complaint.created_at
+            }
+
+            for complaint in complaints
+        ]
+    }
+
+
+@app.get("/admin/statistics")
+def get_admin_statistics(
+    db: Session = Depends(get_db)
+):
+
+    total = db.query(Complaint).count()
+
+    submitted = (
+        db.query(Complaint)
+        .filter(
+            Complaint.status == "Submitted"
+        )
+        .count()
+    )
+
+    under_review = (
+        db.query(Complaint)
+        .filter(
+            Complaint.status == "Under Review"
+        )
+        .count()
+    )
+
+    assigned = (
+        db.query(Complaint)
+        .filter(
+            Complaint.status == "Assigned"
+        )
+        .count()
+    )
+
+    in_progress = (
+        db.query(Complaint)
+        .filter(
+            Complaint.status == "In Progress"
+        )
+        .count()
+    )
+
+    resolved = (
+        db.query(Complaint)
+        .filter(
+            Complaint.status == "Resolved"
+        )
+        .count()
+    )
+
+    rejected = (
+        db.query(Complaint)
+        .filter(
+            Complaint.status == "Rejected"
+        )
+        .count()
+    )
+
+    return {
+
+        "success": True,
+
+        "statistics": {
+
+            "total": total,
+
+            "submitted": submitted,
+
+            "under_review": under_review,
+
+            "assigned": assigned,
+
+            "in_progress": in_progress,
+
+            "resolved": resolved,
+
+            "rejected": rejected
+
+        }
+
+    }
+
+
+@app.get("/admin/complaints")
+def get_admin_complaints(
+
+    city_id: int | None = None,
+
+    department_id: int | None = None,
+
+    status: str | None = None,
+
+    category_id: int | None = None,
+
+    db: Session = Depends(get_db)
+
+):
+
+    query = db.query(Complaint)
+
+    if city_id is not None:
+
+        query = query.filter(
+            Complaint.city_id == city_id
+        )
+
+    if department_id is not None:
+
+        query = query.filter(
+            Complaint.department_id ==
+            department_id
+        )
+
+    if status is not None:
+
+        query = query.filter(
+            Complaint.status == status
+        )
+
+    if category_id is not None:
+
+        query = query.filter(
+            Complaint.category_id ==
+            category_id
+        )
+
+    complaints = (
+        query
+        .order_by(
+            Complaint.created_at.desc()
+        )
+        .all()
+    )
+
+    return {
+
+        "success": True,
+
+        "complaints": [
+
+            {
+
+                "id": complaint.id,
+
+                "complaint_id":
+                    complaint.complaint_id,
+
+                "title":
+                    complaint.title,
+
+                "status":
+                    complaint.status,
+
+                "city":
+                    complaint.city.name,
+
+                "category":
+                    complaint.category.name,
+
+                "department":
+                    complaint.department.name,
+
+                "officer":
+                    complaint.officer.name
+                    if complaint.officer
+                    else None,
+
+                "created_at":
+                    complaint.created_at
+
+            }
+
+            for complaint in complaints
+
+        ]
+
+    }
+
+
+@app.get("/cities")
+def get_cities(
+    db: Session = Depends(get_db)
+):
+
+    cities = (
+        db.query(City)
+        .order_by(City.name)
+        .all()
+    )
+
+    return [
+
+        {
+            "id": city.id,
+            "name": city.name
+        }
+
+        for city in cities
+
+    ]
+
+
+@app.get("/departments")
+def get_departments(
+    db: Session = Depends(get_db)
+):
+
+    departments = (
+        db.query(Department)
+        .order_by(Department.name)
+        .all()
+    )
+
+    return [
+
+        {
+            "id": department.id,
+            "name": department.name
+        }
+
+        for department in departments
+
+    ]
+
+
+@app.get("/categories")
+def get_categories(
+    db: Session = Depends(get_db)
+):
+
+    categories = (
+        db.query(IssueCategory)
+        .order_by(IssueCategory.name)
+        .all()
+    )
+
+    return [
+
+        {
+            "id": category.id,
+            "name": category.name
+        }
+
+        for category in categories
+
+    ]
+
+
+@app.get("/admin/city-statistics")
+def get_city_statistics(
+    db: Session = Depends(get_db)
+):
+
+    cities = (
+        db.query(City)
+        .order_by(City.name)
+        .all()
+    )
+
+    result = []
+
+    for city in cities:
+
+        total = (
+            db.query(Complaint)
+            .filter(
+                Complaint.city_id == city.id
+            )
+            .count()
+        )
+
+        resolved = (
+            db.query(Complaint)
+            .filter(
+                Complaint.city_id == city.id,
+                Complaint.status == "Resolved"
+            )
+            .count()
+        )
+
+        pending = (
+            db.query(Complaint)
+            .filter(
+                Complaint.city_id == city.id,
+                Complaint.status != "Resolved"
+            )
+            .count()
+        )
+
+        resolution_rate = (
+            (resolved / total) * 100
+            if total > 0
+            else 0
+        )
+
+        result.append({
+
+            "city_id": city.id,
+
+            "city": city.name,
+
+            "total": total,
+
+            "pending": pending,
+
+            "resolved": resolved,
+
+            "resolution_rate":
+                round(resolution_rate, 2)
+
+        })
+
+    return {
+
+        "success": True,
+
+        "cities": result
+
+    }
+
+
+@app.get("/admin/department-statistics")
+def get_department_statistics(
+    db: Session = Depends(get_db)
+):
+
+    departments = (
+        db.query(Department)
+        .order_by(Department.name)
+        .all()
+    )
+
+    result = []
+
+    for department in departments:
+
+        total = (
+            db.query(Complaint)
+            .filter(
+                Complaint.department_id ==
+                department.id
+            )
+            .count()
+        )
+
+        resolved = (
+            db.query(Complaint)
+            .filter(
+                Complaint.department_id ==
+                department.id,
+
+                Complaint.status ==
+                "Resolved"
+            )
+            .count()
+        )
+
+        pending = (
+            db.query(Complaint)
+            .filter(
+                Complaint.department_id ==
+                department.id,
+
+                Complaint.status !=
+                "Resolved"
+            )
+            .count()
+        )
+
+        result.append({
+
+            "department_id":
+                department.id,
+
+            "department":
+                department.name,
+
+            "total":
+                total,
+
+            "pending":
+                pending,
+
+            "resolved":
+                resolved
+
+        })
+
+    return {
+
+        "success": True,
+
+        "departments":
+            result
+
+    }
