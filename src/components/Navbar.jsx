@@ -70,6 +70,14 @@ function Navbar() {
             Admin
           </Link>
 
+
+          <Link
+            to="/admin/officers"
+            className="hover:text-blue-200"
+          >
+            Officers
+          </Link>
+
         </div>
 
       </div>

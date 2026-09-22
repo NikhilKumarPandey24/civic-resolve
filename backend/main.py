@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from pydantic import BaseModel
 
+from passlib.context import CryptContext
+
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -19,8 +21,15 @@ from models import Department
 from models import IssueCategory
 from models import ComplaintHistory
 from models import Officer
+from models import User
 
 from datetime import datetime
+
+
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto"
+)
 
 
 # Create database tables
@@ -64,6 +73,28 @@ class ComplaintCreate(BaseModel):
     description: str
 
 
+class OfficerCreate(BaseModel):
+
+    officer_id: str
+
+    name: str
+
+    email: str
+
+    department_id: int
+
+    city_id: int
+
+
+class UserRegister(BaseModel):
+
+    name: str
+
+    email: str
+
+    password: str
+
+
 def get_db():
 
     db = SessionLocal()
@@ -75,6 +106,57 @@ def get_db():
     finally:
 
         db.close()
+
+
+@app.post("/register")
+def register_user(
+
+    user_data: UserRegister,
+
+    db: Session = Depends(get_db)
+
+):
+
+    existing_user = (
+        db.query(User)
+        .filter(
+            User.email == user_data.email
+        )
+        .first()
+    )
+
+    if existing_user:
+        return {
+            "success": False,
+            "message": "Email is already registered."
+        }
+
+    password_hash = pwd_context.hash(
+        user_data.password
+    )
+
+    user = User(
+        name=user_data.name,
+        email=user_data.email,
+        password_hash=password_hash,
+        role="citizen",
+        is_active="true"
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "success": True,
+        "message": "Registration successful.",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+    }
 
 
 @app.get("/")
@@ -601,9 +683,6 @@ def get_officers(
 
     officers = (
         db.query(Officer)
-        .filter(
-            Officer.is_active == "true"
-        )
         .all()
     )
 
@@ -614,11 +693,134 @@ def get_officers(
             "name": officer.name,
             "email": officer.email,
             "department_id": officer.department_id,
-            "city_id": officer.city_id
+            "city_id": officer.city_id,
+            "is_active": officer.is_active
         }
 
         for officer in officers
     ]
+
+
+@app.post("/officers")
+def create_officer(
+
+    officer_data: OfficerCreate,
+
+    db: Session = Depends(get_db)
+
+):
+
+    existing_officer = (
+        db.query(Officer)
+        .filter(
+            (Officer.officer_id == officer_data.officer_id)
+            | (Officer.email == officer_data.email)
+        )
+        .first()
+    )
+
+    if existing_officer:
+        return {
+            "success": False,
+            "message": "Officer ID or email already exists."
+        }
+
+    department = (
+        db.query(Department)
+        .filter(
+            Department.id == officer_data.department_id
+        )
+        .first()
+    )
+
+    if not department:
+        return {
+            "success": False,
+            "message": "Department not found."
+        }
+
+    city = (
+        db.query(City)
+        .filter(
+            City.id == officer_data.city_id
+        )
+        .first()
+    )
+
+    if not city:
+        return {
+            "success": False,
+            "message": "City not found."
+        }
+
+    officer = Officer(
+        officer_id=officer_data.officer_id,
+        name=officer_data.name,
+        email=officer_data.email,
+        department_id=officer_data.department_id,
+        city_id=officer_data.city_id,
+        is_active="true"
+    )
+
+    db.add(officer)
+    db.commit()
+    db.refresh(officer)
+
+    return {
+        "success": True,
+        "message": "Officer created successfully.",
+        "officer": {
+            "id": officer.id,
+            "officer_id": officer.officer_id,
+            "name": officer.name,
+            "email": officer.email,
+            "department_id": officer.department_id,
+            "city_id": officer.city_id,
+            "is_active": officer.is_active
+        }
+    }
+
+
+@app.put("/officers/{officer_id}/status")
+def update_officer_status(
+
+    officer_id: str,
+
+    db: Session = Depends(get_db)
+
+):
+
+    officer = (
+        db.query(Officer)
+        .filter(
+            Officer.officer_id == officer_id
+        )
+        .first()
+    )
+
+    if not officer:
+        return {
+            "success": False,
+            "message": "Officer not found."
+        }
+
+    if officer.is_active == "true":
+        officer.is_active = "false"
+    else:
+        officer.is_active = "true"
+
+    db.commit()
+    db.refresh(officer)
+
+    return {
+        "success": True,
+        "message": (
+            "Officer activated successfully."
+            if officer.is_active == "true"
+            else "Officer deactivated successfully."
+        ),
+        "is_active": officer.is_active
+    }
 
 
 class OfficerAssignment(BaseModel):

@@ -208,17 +208,26 @@ function AdminDashboard() {
               </p>
             </div>
 
-            <div className="bg-white/10 border border-white/20 rounded-2xl px-5 py-4 backdrop-blur-sm">
-              <p className="text-blue-200 text-xs uppercase tracking-wide">
-                System Status
-              </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                to="/admin/officers"
+                className="inline-flex items-center rounded-lg bg-white px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm hover:bg-blue-50"
+              >
+                Manage Officers
+              </Link>
 
-              <div className="flex items-center gap-2 mt-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-green-400"></span>
+              <div className="bg-white/10 border border-white/20 rounded-2xl px-5 py-4 backdrop-blur-sm">
+                <p className="text-blue-200 text-xs uppercase tracking-wide">
+                  System Status
+                </p>
 
-                <span className="font-semibold">
-                  Operational
-                </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-400"></span>
+
+                  <span className="font-semibold">
+                    Operational
+                  </span>
+                </div>
               </div>
             </div>
           </div>

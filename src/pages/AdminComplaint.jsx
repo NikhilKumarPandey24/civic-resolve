@@ -9,6 +9,13 @@ function AdminComplaint() {
   const [history, setHistory] = useState([])
   const [officers, setOfficers] = useState([])
 
+  const filteredOfficers = officers.filter(
+    (officer) =>
+      String(officer.is_active) === 'true' &&
+      Number(officer.department_id) === Number(complaint?.department_id) &&
+      Number(officer.city_id) === Number(complaint?.city_id)
+  )
+
   const [selectedOfficer, setSelectedOfficer] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadingOfficers, setLoadingOfficers] = useState(false)
@@ -505,10 +512,14 @@ function AdminComplaint() {
                         className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       >
                         <option value="">
-                          Select an officer
+                          {loadingOfficers
+                            ? 'Loading officers...'
+                            : filteredOfficers.length === 0
+                              ? 'No officers available for this department and city'
+                              : 'Select an officer'}
                         </option>
 
-                        {officers.map((officer) => (
+                        {filteredOfficers.map((officer) => (
                           <option
                             key={officer.id || officer.officer_id}
                             value={officer.id || officer.officer_id}
@@ -517,6 +528,12 @@ function AdminComplaint() {
                           </option>
                         ))}
                       </select>
+
+                      {!loadingOfficers && filteredOfficers.length === 0 && (
+                        <p className="mt-2 text-sm text-amber-600">
+                          No officers are currently available for this department and city.
+                        </p>
+                      )}
 
                       <button
                         onClick={assignOfficer}

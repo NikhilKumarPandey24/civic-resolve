@@ -8,6 +8,7 @@ import OfficerDashboard from './pages/OfficerDashboard'
 import OfficerComplaint from './pages/OfficerComplaint'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminComplaint from './pages/AdminComplaint'
+import AdminOfficers from './pages/AdminOfficers'
 
 
 function LegacyHome() {
@@ -272,6 +273,11 @@ function App() {
         <Route
           path="/admin/complaint/:complaintId"
           element={<AdminComplaint />}
+        />
+
+        <Route
+          path="/admin/officers"
+          element={<AdminOfficers />}
         />
       </Routes>
     </>
