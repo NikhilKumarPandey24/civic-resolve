@@ -1,12 +1,19 @@
+import os
+
 from fastapi import FastAPI
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Security
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials
 
 from pydantic import BaseModel
 
+from dotenv import load_dotenv
 from passlib.context import CryptContext
+from jose import jwt
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -24,12 +31,115 @@ from models import Officer
 from models import User
 
 from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto"
 )
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY is not configured.")
+
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+
+def create_access_token(data: dict):
+
+    to_encode = data.copy()
+
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+
+    to_encode.update({
+        "exp": expire
+    })
+
+    return jwt.encode(
+        to_encode,
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+
+
+security = HTTPBearer()
+
+
+def get_current_user(
+
+    credentials: HTTPAuthorizationCredentials = Security(security)
+
+):
+
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+
+        user_id = payload.get("user_id")
+        role = payload.get("role")
+
+        if user_id is None or role is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication token."
+            )
+
+        return {
+            "user_id": user_id,
+            "role": role
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+
+def require_admin(
+
+    current_user: dict = Depends(get_current_user)
+
+):
+
+    if current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required."
+        )
+
+    return current_user
+
+
+def require_officer(
+
+    current_user: dict = Depends(get_current_user)
+
+):
+
+    if current_user["role"] != "officer":
+        raise HTTPException(
+            status_code=403,
+            detail="Officer access required."
+        )
+
+    return current_user
 
 
 # Create database tables
@@ -89,6 +199,13 @@ class OfficerCreate(BaseModel):
 class UserRegister(BaseModel):
 
     name: str
+
+    email: str
+
+    password: str
+
+
+class UserLogin(BaseModel):
 
     email: str
 
@@ -156,6 +273,110 @@ def register_user(
             "email": user.email,
             "role": user.role
         }
+    }
+
+
+@app.post("/login")
+def login_user(
+
+    user_data: UserLogin,
+
+    db: Session = Depends(get_db)
+
+):
+
+    user = (
+        db.query(User)
+        .filter(
+            User.email == user_data.email
+        )
+        .first()
+    )
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Invalid email or password."
+        }
+
+    if user.is_active != "true":
+        return {
+            "success": False,
+            "message": "Your account is inactive."
+        }
+
+    if not pwd_context.verify(
+        user_data.password,
+        user.password_hash
+    ):
+        return {
+            "success": False,
+            "message": "Invalid email or password."
+        }
+
+    access_token = create_access_token({
+        "user_id": user.id,
+        "role": user.role
+    })
+
+    return {
+        "success": True,
+        "message": "Login successful.",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+    }
+
+
+@app.get("/auth/me")
+def get_my_account(
+
+    current_user: dict = Depends(get_current_user),
+
+    db: Session = Depends(get_db)
+
+):
+
+    user = (
+        db.query(User)
+        .filter(
+            User.id == current_user["user_id"]
+        )
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found."
+        )
+
+    return {
+        "success": True,
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+    }
+
+
+@app.get("/admin/secure-test")
+def secure_admin_test(
+
+    current_user: dict = Depends(require_admin)
+
+):
+
+    return {
+        "success": True,
+        "message": "You are authorized as admin."
     }
 
 
@@ -500,103 +721,89 @@ class StatusUpdate(BaseModel):
 
 @app.put("/complaints/{complaint_id}/status")
 def update_complaint_status(
-
     complaint_id: str,
-
     status_update: StatusUpdate,
-
+    current_user: dict = Depends(require_officer),
     db: Session = Depends(get_db)
-
 ):
-
     complaint = (
         db.query(Complaint)
         .filter(
-            Complaint.complaint_id ==
-            complaint_id
+            Complaint.complaint_id == complaint_id
         )
         .first()
     )
 
     if not complaint:
-
         return {
             "success": False,
             "message": "Complaint not found."
         }
 
-    allowed_statuses = [
+    officer = (
+        db.query(Officer)
+        .filter(
+            Officer.user_id == current_user["user_id"]
+        )
+        .first()
+    )
 
+    if not officer:
+        raise HTTPException(
+            status_code=403,
+            detail="Officer profile not found."
+        )
+
+    if complaint.officer_id != officer.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only update complaints assigned to you."
+        )
+
+    allowed_statuses = [
         "Submitted",
         "Under Review",
         "Assigned",
         "In Progress",
         "Resolved",
         "Rejected"
-
     ]
 
     if status_update.status not in allowed_statuses:
-
         return {
-
             "success": False,
-
-            "message":
-                "Invalid complaint status."
-
+            "message": "Invalid complaint status."
         }
 
     old_status = complaint.status
-
     new_status = status_update.status
-
     complaint.status = new_status
 
     remarks = (
         status_update.remarks
         if status_update.remarks
         else
-        f"Complaint status changed from "
-        f"{old_status} to {new_status}."
+        f"Complaint status changed from {old_status} to {new_status}."
     )
 
     history = ComplaintHistory(
-
         complaint_id=complaint.id,
-
         old_status=old_status,
-
         new_status=new_status,
-
         remarks=remarks,
-
-        changed_by="Department Officer"
-
+        changed_by=officer.name
     )
 
     db.add(history)
-
     db.commit()
-
     db.refresh(complaint)
 
     return {
-
         "success": True,
-
-        "message":
-            "Complaint updated successfully.",
-
-        "complaint_id":
-            complaint.complaint_id,
-
-        "status":
-            complaint.status,
-
-        "remarks":
-            remarks
-
+        "message": "Complaint updated successfully.",
+        "complaint_id": complaint.complaint_id,
+        "status": complaint.status,
+        "remarks": remarks
     }
 
 
@@ -678,6 +885,7 @@ def get_complaint_history(
 
 @app.get("/officers")
 def get_officers(
+    current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
 
@@ -701,10 +909,43 @@ def get_officers(
     ]
 
 
+@app.get("/officers/me")
+def get_my_officer_profile(
+    current_user: dict = Depends(require_officer),
+    db: Session = Depends(get_db)
+):
+    officer = (
+        db.query(Officer)
+        .filter(Officer.user_id == current_user["user_id"])
+        .first()
+    )
+
+    if not officer:
+        raise HTTPException(
+            status_code=404,
+            detail="Officer profile not found."
+        )
+
+    return {
+        "success": True,
+        "officer": {
+            "id": officer.id,
+            "officer_id": officer.officer_id,
+            "name": officer.name,
+            "email": officer.email,
+            "department_id": officer.department_id,
+            "city_id": officer.city_id,
+            "is_active": officer.is_active
+        }
+    }
+
+
 @app.post("/officers")
 def create_officer(
 
     officer_data: OfficerCreate,
+
+    current_user: dict = Depends(require_admin),
 
     db: Session = Depends(get_db)
 
@@ -786,6 +1027,8 @@ def update_officer_status(
 
     officer_id: str,
 
+    current_user: dict = Depends(require_admin),
+
     db: Session = Depends(get_db)
 
 ):
@@ -831,6 +1074,7 @@ class OfficerAssignment(BaseModel):
 def assign_officer(
     complaint_id: str,
     assignment: OfficerAssignment,
+    current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
 
@@ -910,9 +1154,9 @@ def assign_officer(
 @app.get("/officers/{officer_id}/complaints")
 def get_officer_complaints(
     officer_id: int,
+    current_user: dict = Depends(require_officer),
     db: Session = Depends(get_db)
 ):
-
     officer = (
         db.query(Officer)
         .filter(Officer.id == officer_id)
@@ -920,68 +1164,42 @@ def get_officer_complaints(
     )
 
     if not officer:
-        return {
-            "success": False,
-            "message": "Officer not found."
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Officer not found."
+        )
+
+    if officer.user_id != current_user["user_id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only access your own complaints."
+        )
 
     complaints = (
         db.query(Complaint)
-        .filter(
-            Complaint.officer_id == officer_id
-        )
-        .order_by(
-            Complaint.created_at.desc()
-        )
+        .filter(Complaint.officer_id == officer.id)
+        .order_by(Complaint.created_at.desc())
         .all()
     )
 
-    return {
-        "success": True,
-
-        "officer": {
-            "id": officer.id,
-            "officer_id": officer.officer_id,
-            "name": officer.name,
-            "email": officer.email
-        },
-
-        "complaints": [
-
-            {
-                "id": complaint.id,
-                "complaint_id":
-                    complaint.complaint_id,
-
-                "title":
-                    complaint.title,
-
-                "description":
-                    complaint.description,
-
-                "status":
-                    complaint.status,
-
-                "city":
-                    complaint.city.name,
-
-                "category":
-                    complaint.category.name,
-
-                "department":
-                    complaint.department.name,
-
-                "created_at":
-                    complaint.created_at
-            }
-
-            for complaint in complaints
-        ]
-    }
+    return [
+        {
+            "complaint_id": complaint.complaint_id,
+            "title": complaint.title,
+            "description": complaint.description,
+            "status": complaint.status,
+            "city": complaint.city.name,
+            "category": complaint.category.name,
+            "department": complaint.department.name,
+            "created_at": complaint.created_at
+        }
+        for complaint in complaints
+    ]
 
 
 @app.get("/admin/statistics")
 def get_admin_statistics(
+    current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
 
@@ -1070,6 +1288,8 @@ def get_admin_complaints(
     status: str | None = None,
 
     category_id: int | None = None,
+
+    current_user: dict = Depends(require_admin),
 
     db: Session = Depends(get_db)
 
@@ -1227,6 +1447,7 @@ def get_categories(
 
 @app.get("/admin/city-statistics")
 def get_city_statistics(
+    current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
 
@@ -1300,6 +1521,7 @@ def get_city_statistics(
 
 @app.get("/admin/department-statistics")
 def get_department_statistics(
+    current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
 

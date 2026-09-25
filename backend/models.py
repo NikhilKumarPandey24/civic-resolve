@@ -137,6 +137,13 @@ class Officer(Base):
         nullable=False
     )
 
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        unique=True,
+        nullable=True
+    )
+
     department_id = Column(
         Integer,
         ForeignKey("departments.id"),
@@ -161,6 +168,10 @@ class Officer(Base):
 
     city = relationship(
         "City"
+    )
+
+    user = relationship(
+        "User"
     )
 
 

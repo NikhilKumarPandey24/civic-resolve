@@ -1,9 +1,11 @@
 import './App.css'
 import { Routes, Route, Link } from 'react-router-dom'
+import ProtectedRoute from './components/ProtectedRoute'
 import Home from './pages/Home'
 import Navbar from './components/Navbar'
 import ReportIssue from './pages/ReportIssue'
 import TrackComplaint from './pages/TrackComplaint'
+import Login from './pages/Login'
 import OfficerDashboard from './pages/OfficerDashboard'
 import OfficerComplaint from './pages/OfficerComplaint'
 import AdminDashboard from './pages/AdminDashboard'
@@ -256,28 +258,53 @@ function App() {
         />
 
         <Route
+          path="/login"
+          element={<Login />}
+        />
+
+        <Route
           path="/officer"
-          element={<OfficerDashboard />}
+          element={
+            <ProtectedRoute allowedRoles={['officer']}>
+              <OfficerDashboard />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/officer/complaint/:complaintId"
-          element={<OfficerComplaint />}
+          element={
+            <ProtectedRoute allowedRoles={['officer']}>
+              <OfficerComplaint />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/admin"
-          element={<AdminDashboard />}
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminDashboard />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/admin/complaint/:complaintId"
-          element={<AdminComplaint />}
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminComplaint />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/admin/officers"
-          element={<AdminOfficers />}
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminOfficers />
+            </ProtectedRoute>
+          }
         />
       </Routes>
     </>

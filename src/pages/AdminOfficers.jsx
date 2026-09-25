@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 
 function AdminOfficers() {
+  const token = localStorage.getItem('access_token')
+
+  const authHeaders = {
+    Authorization: `Bearer ${token}`
+  }
+
   const [officers, setOfficers] = useState([])
   const [cities, setCities] = useState([])
   const [departments, setDepartments] = useState([])
@@ -29,7 +35,9 @@ function AdminOfficers() {
 
       const [officersRes, citiesRes, departmentsRes] =
         await Promise.all([
-          fetch('http://localhost:8000/officers'),
+          fetch('http://localhost:8000/officers', {
+            headers: authHeaders,
+          }),
           fetch('http://localhost:8000/cities'),
           fetch('http://localhost:8000/departments'),
         ])
@@ -95,6 +103,7 @@ function AdminOfficers() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...authHeaders,
           },
           body: JSON.stringify({
             officer_id: form.officer_id,
@@ -162,6 +171,7 @@ function AdminOfficers() {
         `http://localhost:8000/officers/${officerId}/status`,
         {
           method: 'PUT',
+          headers: authHeaders,
         }
       )
 

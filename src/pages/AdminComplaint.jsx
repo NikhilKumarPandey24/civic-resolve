@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 function AdminComplaint() {
+  const token = localStorage.getItem('access_token')
+
+  const authHeaders = {
+    Authorization: `Bearer ${token}`
+  }
+
   const { complaintId } = useParams()
   const navigate = useNavigate()
 
@@ -59,7 +65,10 @@ function AdminComplaint() {
 
     try {
       const response = await fetch(
-        'http://localhost:8000/officers'
+        'http://localhost:8000/officers',
+        {
+          headers: authHeaders
+        }
       )
 
       const data = await response.json()
@@ -156,6 +165,7 @@ function AdminComplaint() {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
+            ...authHeaders
           },
           body: JSON.stringify({
             officer_id: Number(selectedOfficer),

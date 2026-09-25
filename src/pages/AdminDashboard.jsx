@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 function AdminDashboard() {
+  const token = localStorage.getItem('access_token')
+
+  const authHeaders = {
+    Authorization: `Bearer ${token}`
+  }
+
   const [statistics, setStatistics] = useState(null)
   const [complaints, setComplaints] = useState([])
   const [loading, setLoading] = useState(true)
@@ -23,7 +29,10 @@ function AdminDashboard() {
     async function loadDashboard() {
       try {
         const statsResponse = await fetch(
-          'http://localhost:8000/admin/statistics'
+          'http://localhost:8000/admin/statistics',
+          {
+            headers: authHeaders
+          }
         )
 
         const statsData = await statsResponse.json()
@@ -33,7 +42,10 @@ function AdminDashboard() {
         }
 
         const cityResponse = await fetch(
-          'http://localhost:8000/admin/city-statistics'
+          'http://localhost:8000/admin/city-statistics',
+          {
+            headers: authHeaders
+          }
         )
 
         const cityData = await cityResponse.json()
@@ -43,7 +55,10 @@ function AdminDashboard() {
         }
 
         const departmentResponse = await fetch(
-          'http://localhost:8000/admin/department-statistics'
+          'http://localhost:8000/admin/department-statistics',
+          {
+            headers: authHeaders
+          }
         )
 
         const departmentData = await departmentResponse.json()
@@ -112,7 +127,10 @@ function AdminDashboard() {
       }
 
       const response = await fetch(
-        `http://localhost:8000/admin/complaints?${params.toString()}`
+        `http://localhost:8000/admin/complaints?${params.toString()}`,
+        {
+          headers: authHeaders
+        }
       )
 
       const data = await response.json()

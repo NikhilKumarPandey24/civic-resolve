@@ -3,6 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom'
 
 
 function OfficerComplaint() {
+  const token = localStorage.getItem('access_token')
+
+  const authHeaders = {
+    Authorization: `Bearer ${token}`
+  }
 
   const { complaintId } = useParams()
 
@@ -64,7 +69,10 @@ function OfficerComplaint() {
 
       const historyResponse =
         await fetch(
-          `http://localhost:8000/complaints/${complaintId}/history`
+          `http://localhost:8000/complaints/${complaintId}/history`,
+          {
+            headers: authHeaders
+          }
         )
 
 
@@ -132,7 +140,8 @@ function OfficerComplaint() {
 
             headers: {
               'Content-Type':
-                'application/json'
+                'application/json',
+              ...authHeaders
             },
 
             body: JSON.stringify({
