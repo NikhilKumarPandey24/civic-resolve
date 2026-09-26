@@ -70,14 +70,17 @@ def create_access_token(data: dict):
     )
 
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
 
-    credentials: HTTPAuthorizationCredentials = Security(security)
+    credentials: HTTPAuthorizationCredentials | None = Security(security)
 
 ):
+
+    if credentials is None:
+        return None
 
     token = credentials.credentials
 
@@ -114,9 +117,15 @@ def get_current_user(
 
 def require_admin(
 
-    current_user: dict = Depends(get_current_user)
+    current_user: dict | None = Depends(get_current_user)
 
 ):
+
+    if current_user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated."
+        )
 
     if current_user["role"] != "admin":
         raise HTTPException(
@@ -129,9 +138,15 @@ def require_admin(
 
 def require_officer(
 
-    current_user: dict = Depends(get_current_user)
+    current_user: dict | None = Depends(get_current_user)
 
 ):
+
+    if current_user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated."
+        )
 
     if current_user["role"] != "officer":
         raise HTTPException(
@@ -190,6 +205,8 @@ class OfficerCreate(BaseModel):
     name: str
 
     email: str
+
+    password: str
 
     department_id: int
 
@@ -390,13 +407,10 @@ def home():
 
 @app.post("/complaints")
 def create_complaint(
-
     complaint: ComplaintCreate,
-
-    db: Session = Depends(get_db)
-
+    db: Session = Depends(get_db),
+    current_user: dict | None = Depends(get_current_user)
 ):
-
     # Check city
     city = (
         db.query(City)
@@ -407,7 +421,6 @@ def create_complaint(
     )
 
     if not city:
-
         return {
             "success": False,
             "message": "Invalid city."
@@ -417,14 +430,12 @@ def create_complaint(
     category = (
         db.query(IssueCategory)
         .filter(
-            IssueCategory.id ==
-            complaint.category_id
+            IssueCategory.id == complaint.category_id
         )
         .first()
     )
 
     if not category:
-
         return {
             "success": False,
             "message": "Invalid issue category."
@@ -439,77 +450,52 @@ def create_complaint(
         )
     )
 
+    # Get logged-in citizen's user ID
+    user_id = None
+
+    if current_user:
+        user_id = current_user["user_id"]
 
     new_complaint = Complaint(
-
         complaint_id=complaint_id,
-
         city_id=complaint.city_id,
-
         department_id=department_id,
-
         category_id=complaint.category_id,
-
         title=complaint.title,
-
         description=complaint.description,
-
-        status="Submitted"
-
+        status="Submitted",
+        user_id=user_id
     )
 
-
-    db.add(
-        new_complaint
-    )
-
+    db.add(new_complaint)
     db.commit()
-
-    db.refresh(
-        new_complaint
-    )
+    db.refresh(new_complaint)
 
     history = ComplaintHistory(
-
         complaint_id=new_complaint.id,
-
         old_status=None,
-
         new_status="Submitted",
-
         remarks="Complaint submitted by citizen.",
-
         changed_by="Citizen"
-
     )
 
     db.add(history)
-
     db.commit()
 
-
     return {
-
         "success": True,
-
         "complaint_id":
             new_complaint.complaint_id,
-
         "city":
             city.name,
-
         "category":
             category.name,
-
         "department_id":
             department_id,
-
         "message":
             "Complaint submitted successfully!",
-
         "status":
             new_complaint.status
-
     }
 
 
@@ -883,6 +869,54 @@ def get_complaint_history(
     }
 
 
+@app.get("/citizen/complaints")
+def get_my_complaints(
+    current_user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated."
+        )
+
+    if current_user["role"] != "citizen":
+        raise HTTPException(
+            status_code=403,
+            detail="Citizen access required."
+        )
+
+    complaints = (
+        db.query(Complaint)
+        .filter(
+            Complaint.user_id == current_user["user_id"]
+        )
+        .order_by(
+            Complaint.created_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        {
+            "complaint_id": complaint.complaint_id,
+            "title": complaint.title,
+            "description": complaint.description,
+            "status": complaint.status,
+            "city": complaint.city.name,
+            "category": complaint.category.name,
+            "department": complaint.department.name,
+            "officer": (
+                complaint.officer.name
+                if complaint.officer
+                else None
+            ),
+            "created_at": complaint.created_at
+        }
+        for complaint in complaints
+    ]
+
+
 @app.get("/officers")
 def get_officers(
     current_user: dict = Depends(require_admin),
@@ -951,11 +985,11 @@ def create_officer(
 
 ):
 
+    # Check whether the Officer ID already exists
     existing_officer = (
         db.query(Officer)
         .filter(
-            (Officer.officer_id == officer_data.officer_id)
-            | (Officer.email == officer_data.email)
+            Officer.officer_id == officer_data.officer_id
         )
         .first()
     )
@@ -963,9 +997,25 @@ def create_officer(
     if existing_officer:
         return {
             "success": False,
-            "message": "Officer ID or email already exists."
+            "message": "Officer ID already exists."
         }
 
+    # Check whether the email already belongs to a User
+    existing_user = (
+        db.query(User)
+        .filter(
+            User.email == officer_data.email
+        )
+        .first()
+    )
+
+    if existing_user:
+        return {
+            "success": False,
+            "message": "Email already exists."
+        }
+
+    # Check department
     department = (
         db.query(Department)
         .filter(
@@ -980,6 +1030,7 @@ def create_officer(
             "message": "Department not found."
         }
 
+    # Check city
     city = (
         db.query(City)
         .filter(
@@ -994,22 +1045,52 @@ def create_officer(
             "message": "City not found."
         }
 
+    # Hash the officer's password
+    hashed_password = pwd_context.hash(
+        officer_data.password
+    )
+
+    # Create User account
+    user = User(
+        name=officer_data.name,
+        email=officer_data.email,
+        password_hash=hashed_password,
+        role="officer",
+        is_active="true"
+    )
+
+    db.add(user)
+    db.flush()
+
+    # Create Officer profile linked to User
     officer = Officer(
         officer_id=officer_data.officer_id,
         name=officer_data.name,
         email=officer_data.email,
+        user_id=user.id,
         department_id=officer_data.department_id,
         city_id=officer_data.city_id,
         is_active="true"
     )
 
     db.add(officer)
-    db.commit()
-    db.refresh(officer)
+
+    try:
+        db.commit()
+        db.refresh(user)
+        db.refresh(officer)
+
+    except Exception:
+        db.rollback()
+
+        return {
+            "success": False,
+            "message": "Unable to create officer account."
+        }
 
     return {
         "success": True,
-        "message": "Officer created successfully.",
+        "message": "Officer account created successfully.",
         "officer": {
             "id": officer.id,
             "officer_id": officer.officer_id,
@@ -1017,7 +1098,8 @@ def create_officer(
             "email": officer.email,
             "department_id": officer.department_id,
             "city_id": officer.city_id,
-            "is_active": officer.is_active
+            "is_active": officer.is_active,
+            "user_id": officer.user_id
         }
     }
 

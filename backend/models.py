@@ -250,6 +250,12 @@ class Complaint(Base):
         nullable=True
     )
 
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True
+    )
+
     category_id = Column(
         Integer,
         ForeignKey("issue_categories.id"),

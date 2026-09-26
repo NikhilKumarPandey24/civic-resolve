@@ -50,6 +50,15 @@ function Navbar() {
             Track Complaint
           </Link>
 
+          {user?.role === 'citizen' && (
+            <Link
+              to="/my-complaints"
+              className="hover:text-blue-200"
+            >
+              My Complaints
+            </Link>
+          )}
+
           {user?.role === 'officer' && (
             <Link
               to="/officer"

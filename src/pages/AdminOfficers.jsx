@@ -4,7 +4,7 @@ function AdminOfficers() {
   const token = localStorage.getItem('access_token')
 
   const authHeaders = {
-    Authorization: `Bearer ${token}`
+    Authorization: `Bearer ${token}`,
   }
 
   const [officers, setOfficers] = useState([])
@@ -19,6 +19,8 @@ function AdminOfficers() {
     officer_id: '',
     name: '',
     email: '',
+    password: '',
+    confirm_password: '',
     department_id: '',
     city_id: '',
   })
@@ -87,10 +89,22 @@ function AdminOfficers() {
       !form.officer_id ||
       !form.name ||
       !form.email ||
+      !form.password ||
+      !form.confirm_password ||
       !form.department_id ||
       !form.city_id
     ) {
       setError('Please fill in all fields.')
+      return
+    }
+
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters long.')
+      return
+    }
+
+    if (form.password !== form.confirm_password) {
+      setError('Passwords do not match.')
       return
     }
 
@@ -109,6 +123,7 @@ function AdminOfficers() {
             officer_id: form.officer_id,
             name: form.name,
             email: form.email,
+            password: form.password,
             department_id: Number(form.department_id),
             city_id: Number(form.city_id),
           }),
@@ -124,12 +139,16 @@ function AdminOfficers() {
         return
       }
 
-      setMessage('Officer created successfully.')
+      setMessage(
+        'Officer account created successfully. The officer can now log in.'
+      )
 
       setForm({
         officer_id: '',
         name: '',
         email: '',
+        password: '',
+        confirm_password: '',
         department_id: '',
         city_id: '',
       })
@@ -238,7 +257,7 @@ function AdminOfficers() {
             </h2>
 
             <p className="text-sm text-slate-500 mt-1">
-              Create an officer account for complaint assignment.
+              Create an officer account for complaint assignment and login.
             </p>
           </div>
 
@@ -291,6 +310,38 @@ function AdminOfficers() {
                 value={form.email}
                 onChange={handleChange}
                 placeholder="officer@example.com"
+                className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Password
+              </label>
+
+              <input
+                type="password"
+                name="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="Minimum 8 characters"
+                className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Confirm Password */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Confirm Password
+              </label>
+
+              <input
+                type="password"
+                name="confirm_password"
+                value={form.confirm_password}
+                onChange={handleChange}
+                placeholder="Re-enter password"
                 className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -359,7 +410,7 @@ function AdminOfficers() {
               >
                 {creating
                   ? 'Creating...'
-                  : 'Add Officer'}
+                  : 'Create Officer Account'}
               </button>
 
             </div>
@@ -398,6 +449,7 @@ function AdminOfficers() {
                 <thead className="bg-slate-50 border-b border-slate-200">
 
                   <tr>
+
                     <th className="px-6 py-4 text-sm font-semibold text-slate-600">
                       Officer
                     </th>
@@ -421,6 +473,7 @@ function AdminOfficers() {
                     <th className="px-6 py-4 text-sm font-semibold text-slate-600">
                       Action
                     </th>
+
                   </tr>
 
                 </thead>

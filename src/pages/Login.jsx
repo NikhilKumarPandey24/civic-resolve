@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 
 function Login() {
   const navigate = useNavigate()
@@ -79,6 +79,7 @@ function Login() {
 
         {/* Header */}
         <div className="mb-8 text-center">
+
           <p className="text-sm font-semibold text-blue-700">
             CivicResolve
           </p>
@@ -90,6 +91,7 @@ function Login() {
           <p className="mt-2 text-slate-600">
             Login to access your CivicResolve account.
           </p>
+
         </div>
 
         {/* Login Card */}
@@ -108,6 +110,7 @@ function Login() {
 
             {/* Email */}
             <div>
+
               <label className="mb-2 block text-sm font-semibold text-slate-700">
                 Email Address
               </label>
@@ -120,10 +123,12 @@ function Login() {
                 required
                 className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
               />
+
             </div>
 
             {/* Password */}
             <div>
+
               <label className="mb-2 block text-sm font-semibold text-slate-700">
                 Password
               </label>
@@ -136,6 +141,7 @@ function Login() {
                 required
                 className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
               />
+
             </div>
 
             {/* Button */}
@@ -148,6 +154,22 @@ function Login() {
             </button>
 
           </form>
+
+          {/* Register Link */}
+          <div className="mt-6 border-t border-slate-200 pt-6 text-center">
+
+            <p className="text-sm text-slate-500">
+              Don't have an account?{' '}
+
+              <Link
+                to="/register"
+                className="font-semibold text-blue-700 hover:text-blue-800"
+              >
+                Create an account
+              </Link>
+            </p>
+
+          </div>
 
         </div>
 

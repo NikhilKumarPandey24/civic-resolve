@@ -6,6 +6,8 @@ import Navbar from './components/Navbar'
 import ReportIssue from './pages/ReportIssue'
 import TrackComplaint from './pages/TrackComplaint'
 import Login from './pages/Login'
+import Register from './pages/Register'
+import MyComplaints from './pages/MyComplaints'
 import OfficerDashboard from './pages/OfficerDashboard'
 import OfficerComplaint from './pages/OfficerComplaint'
 import AdminDashboard from './pages/AdminDashboard'
@@ -260,6 +262,20 @@ function App() {
         <Route
           path="/login"
           element={<Login />}
+        />
+
+        <Route
+          path="/register"
+          element={<Register />}
+        />
+
+        <Route
+          path="/my-complaints"
+          element={
+            <ProtectedRoute allowedRoles={['citizen']}>
+              <MyComplaints />
+            </ProtectedRoute>
+          }
         />
 
         <Route
