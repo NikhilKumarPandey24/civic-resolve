@@ -13,6 +13,7 @@ function ReportIssue() {
 
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
+  const user = JSON.parse(localStorage.getItem('user') || 'null')
 
   useEffect(() => {
 
@@ -171,6 +172,22 @@ function ReportIssue() {
           </p>
 
         </div>
+
+        {user?.role === 'citizen' && (
+          <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <p className="text-sm text-blue-600">
+              Logged in as
+            </p>
+
+            <p className="font-semibold text-gray-900">
+              {user.name}
+            </p>
+
+            <p className="text-sm text-gray-500">
+              Your complaint will be linked to your account.
+            </p>
+          </div>
+        )}
 
 
         {/* FORM CARD */}

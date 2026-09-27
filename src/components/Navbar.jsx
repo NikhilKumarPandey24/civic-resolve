@@ -51,12 +51,21 @@ function Navbar() {
           </Link>
 
           {user?.role === 'citizen' && (
-            <Link
-              to="/my-complaints"
-              className="hover:text-blue-200"
-            >
-              My Complaints
-            </Link>
+            <>
+              <Link
+                to="/citizen"
+                className="hover:text-blue-200"
+              >
+                Dashboard
+              </Link>
+
+              <Link
+                to="/my-complaints"
+                className="hover:text-blue-200"
+              >
+                My Complaints
+              </Link>
+            </>
           )}
 
           {user?.role === 'officer' && (

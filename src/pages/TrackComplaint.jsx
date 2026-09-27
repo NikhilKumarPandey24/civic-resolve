@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 function TrackComplaint() {
+
+  const [searchParams] = useSearchParams()
+  const complaintFromUrl = searchParams.get('complaint')
 
   const [complaintId, setComplaintId] = useState('')
   const [complaint, setComplaint] = useState(null)
@@ -9,11 +13,11 @@ function TrackComplaint() {
   const [loading, setLoading] = useState(false)
 
 
-  async function trackComplaint(event) {
+  async function trackComplaint(event, id = complaintId) {
 
     event.preventDefault()
 
-    if (!complaintId.trim()) {
+    if (!id.trim()) {
 
       setMessage('Please enter your Complaint ID.')
       return
@@ -28,7 +32,7 @@ function TrackComplaint() {
     try {
 
       const response = await fetch(
-        `http://localhost:8000/complaints/${complaintId.trim()}`
+        `http://localhost:8000/complaints/${id.trim()}`
       )
 
       const data = await response.json()
@@ -40,7 +44,7 @@ function TrackComplaint() {
 
 
         const historyResponse = await fetch(
-          `http://localhost:8000/complaints/${complaintId.trim()}/history`
+          `http://localhost:8000/complaints/${id.trim()}/history`
         )
 
         const historyData =
@@ -75,6 +79,19 @@ function TrackComplaint() {
 
     }
   }
+
+
+  const trackComplaintFromUrl = useEffectEvent((id) => {
+    setComplaintId(id)
+    trackComplaint({ preventDefault: () => {} }, id)
+  })
+
+
+  useEffect(() => {
+    if (complaintFromUrl) {
+      trackComplaintFromUrl(complaintFromUrl)
+    }
+  }, [complaintFromUrl])
 
 
   function getStatusStyle(status) {

@@ -21,6 +21,7 @@ function AdminDashboard() {
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
+  const [assignmentFilter, setAssignmentFilter] = useState('')
 
   const [cityStatistics, setCityStatistics] = useState([])
   const [departmentStatistics, setDepartmentStatistics] = useState([])
@@ -152,6 +153,18 @@ function AdminDashboard() {
     selectedCategory,
   ])
 
+  const displayedComplaints = complaints.filter((complaint) => {
+    if (assignmentFilter === 'assigned') {
+      return Boolean(complaint.officer)
+    }
+
+    if (assignmentFilter === 'unassigned') {
+      return !complaint.officer
+    }
+
+    return true
+  })
+
   function getStatusStyle(status) {
     switch (status) {
       case 'Resolved':
@@ -273,7 +286,7 @@ function AdminDashboard() {
           </div>
 
           {statistics && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
               {/* Total */}
               <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
                 <p className="text-sm font-medium text-gray-500">
@@ -378,6 +391,21 @@ function AdminDashboard() {
                   Not accepted
                 </p>
               </div>
+
+              {/* Resolution Rate */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+                <p className="text-sm font-medium text-gray-500">
+                  Resolution Rate
+                </p>
+
+                <p className="text-3xl font-bold text-gray-900 mt-2">
+                  {statistics.total > 0
+                    ? `${Math.round(
+                        (statistics.resolved / statistics.total) * 100
+                      )}%`
+                    : '0%'}
+                </p>
+              </div>
             </div>
           )}
         </section>
@@ -395,7 +423,7 @@ function AdminDashboard() {
               </p>
             </div>
 
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               {/* City */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -517,6 +545,33 @@ function AdminDashboard() {
                       {category.name}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              {/* Assignment */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Assignment
+                </label>
+
+                <select
+                  value={assignmentFilter}
+                  onChange={(event) =>
+                    setAssignmentFilter(event.target.value)
+                  }
+                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">
+                    All Assignments
+                  </option>
+
+                  <option value="assigned">
+                    Assigned
+                  </option>
+
+                  <option value="unassigned">
+                    Unassigned
+                  </option>
                 </select>
               </div>
             </div>
@@ -699,12 +754,12 @@ function AdminDashboard() {
             </div>
 
             <div className="bg-blue-50 border border-blue-100 text-blue-700 px-4 py-2 rounded-xl text-sm font-semibold">
-              {complaints.length} complaint
-              {complaints.length === 1 ? '' : 's'}
+              {displayedComplaints.length} complaint
+              {displayedComplaints.length === 1 ? '' : 's'}
             </div>
           </div>
 
-          {complaints.length === 0 ? (
+          {displayedComplaints.length === 0 ? (
             <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-12 text-center">
               <div className="text-5xl mb-4">
                 📭
@@ -747,11 +802,15 @@ function AdminDashboard() {
                       <th className="text-left px-6 py-4 text-xs font-bold uppercase tracking-wider">
                         Status
                       </th>
+
+                      <th className="text-left px-6 py-4 text-xs font-bold uppercase tracking-wider">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
 
                   <tbody className="divide-y divide-gray-100">
-                    {complaints.map((complaint) => (
+                    {displayedComplaints.map((complaint) => (
                       <tr
                         key={complaint.id}
                         className="hover:bg-gray-50 transition"
@@ -791,10 +850,16 @@ function AdminDashboard() {
                           </p>
                         </td>
 
-                        <td className="px-6 py-5">
-                          <p className="text-sm text-gray-700">
-                            {complaint.officer || 'Not assigned'}
-                          </p>
+                        <td className="px-6 py-4">
+                          {complaint.officer ? (
+                            <span className="font-medium text-gray-900">
+                              {complaint.officer}
+                            </span>
+                          ) : (
+                            <span className="font-medium text-red-600">
+                              Unassigned
+                            </span>
+                          )}
                         </td>
 
                         <td className="px-6 py-5">
@@ -805,6 +870,15 @@ function AdminDashboard() {
                           >
                             {complaint.status}
                           </span>
+                        </td>
+
+                        <td className="px-6 py-5">
+                          <Link
+                            to={`/admin/complaint/${complaint.complaint_id}`}
+                            className="text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            View Details
+                          </Link>
                         </td>
                       </tr>
                     ))}

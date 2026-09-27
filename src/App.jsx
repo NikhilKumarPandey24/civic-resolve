@@ -8,6 +8,7 @@ import TrackComplaint from './pages/TrackComplaint'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import MyComplaints from './pages/MyComplaints'
+import CitizenDashboard from './pages/CitizenDashboard'
 import OfficerDashboard from './pages/OfficerDashboard'
 import OfficerComplaint from './pages/OfficerComplaint'
 import AdminDashboard from './pages/AdminDashboard'
@@ -274,6 +275,15 @@ function App() {
           element={
             <ProtectedRoute allowedRoles={['citizen']}>
               <MyComplaints />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/citizen"
+          element={
+            <ProtectedRoute allowedRoles={['citizen']}>
+              <CitizenDashboard />
             </ProtectedRoute>
           }
         />

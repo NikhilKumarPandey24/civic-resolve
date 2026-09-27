@@ -60,7 +60,7 @@ function Login() {
       } else if (data.user.role === 'officer') {
         navigate('/officer')
       } else {
-        navigate('/')
+        navigate('/citizen')
       }
 
     } catch (err) {
