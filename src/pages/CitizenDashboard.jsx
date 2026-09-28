@@ -256,15 +256,19 @@ function CitizenDashboard() {
                   <div>
 
                     <p className="text-sm font-semibold text-blue-700">
-                      {complaint.complaint_id}
+                      Complaint ID: {complaint.complaint_id}
                     </p>
 
                     <h3 className="mt-1 font-bold text-slate-900">
                       {complaint.title}
                     </h3>
 
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-sm text-slate-600">
                       {complaint.city} • {complaint.category}
+                    </p>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      Submitted: {new Date(complaint.created_at).toLocaleDateString()}
                     </p>
 
                   </div>

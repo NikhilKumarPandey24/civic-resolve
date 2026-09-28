@@ -153,10 +153,22 @@ function OfficerComplaint() {
 
 
       const data =
-        await response.json()
+        await response.json().catch(() => null)
 
 
-      if (!data.success) {
+      if (!response.ok) {
+
+        setMessage(
+          data?.detail ||
+          'Unable to update complaint.'
+        )
+
+        return
+
+      }
+
+
+      if (!data?.success) {
 
         setMessage(
           data.message ||

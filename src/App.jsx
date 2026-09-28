@@ -14,6 +14,7 @@ import OfficerComplaint from './pages/OfficerComplaint'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminComplaint from './pages/AdminComplaint'
 import AdminOfficers from './pages/AdminOfficers'
+import NotFound from './pages/NotFound'
 
 
 function LegacyHome() {
@@ -332,6 +333,8 @@ function App() {
             </ProtectedRoute>
           }
         />
+
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </>
   )

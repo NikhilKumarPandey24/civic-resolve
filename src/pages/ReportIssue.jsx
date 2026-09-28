@@ -110,6 +110,20 @@ function ReportIssue() {
         }
       )
 
+      if (!response.ok) {
+
+        const errorData = await response.json().catch(() => null)
+
+        setMessage(
+          errorData?.detail ||
+          errorData?.message ||
+          'Failed to submit complaint.'
+        )
+
+        return
+
+      }
+
       const data = await response.json()
 
 
