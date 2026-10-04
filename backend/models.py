@@ -301,6 +301,12 @@ class Complaint(Base):
         "Officer"
     )
 
+    history = relationship(
+        "ComplaintHistory",
+        back_populates="complaint",
+        cascade="all, delete-orphan"
+    )
+
 
 class ComplaintHistory(Base):
 
@@ -344,7 +350,8 @@ class ComplaintHistory(Base):
     )
 
     complaint = relationship(
-        "Complaint"
+        "Complaint",
+        back_populates="history"
     )
 
 

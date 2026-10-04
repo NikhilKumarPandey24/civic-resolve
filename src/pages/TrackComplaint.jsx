@@ -507,9 +507,11 @@ function TrackComplaint() {
 
                         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
 
-                          <h3 className="font-bold text-slate-900">
-                            {item.new_status}
-                          </h3>
+                          <div className="font-semibold text-gray-900">
+                            {item.old_status
+                              ? `${item.old_status} → ${item.new_status}`
+                              : item.new_status}
+                          </div>
 
                           <span className="text-sm text-slate-500">
                             {new Date(
@@ -528,10 +530,6 @@ function TrackComplaint() {
 
                         )}
 
-
-                        <p className="mt-3 text-xs font-medium text-slate-500">
-                          Changed by: {item.changed_by}
-                        </p>
 
                       </div>
 

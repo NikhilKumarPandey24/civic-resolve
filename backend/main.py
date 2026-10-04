@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.security import HTTPAuthorizationCredentials
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from dotenv import load_dotenv
 from passlib.context import CryptContext
@@ -70,12 +70,26 @@ def create_access_token(data: dict):
     )
 
 
+def get_db():
+
+    db = SessionLocal()
+
+    try:
+
+        yield db
+
+    finally:
+
+        db.close()
+
+
 security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
 
-    credentials: HTTPAuthorizationCredentials | None = Security(security)
+    credentials: HTTPAuthorizationCredentials | None = Security(security),
+    db: Session = Depends(get_db)
 
 ):
 
@@ -100,9 +114,35 @@ def get_current_user(
                 detail="Invalid authentication token."
             )
 
+        # Check the user's current status in the database
+        user = (
+            db.query(User)
+            .filter(User.id == user_id)
+            .first()
+        )
+
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="User account not found."
+            )
+
+        if user.is_active != "true":
+            raise HTTPException(
+                status_code=401,
+                detail="Your account is inactive."
+            )
+
+        # Also make sure the token role matches the current database role
+        if user.role != role:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication token."
+            )
+
         return {
-            "user_id": user_id,
-            "role": role
+            "user_id": user.id,
+            "role": user.role
         }
 
     except HTTPException:
@@ -193,9 +233,29 @@ class ComplaintCreate(BaseModel):
 
     category_id: int
 
-    title: str
+    title: str = Field(
+        ...,
+        min_length=3,
+        max_length=150
+    )
 
-    description: str
+    description: str = Field(
+        ...,
+        min_length=10,
+        max_length=2000
+    )
+
+    @field_validator("title", "description")
+    @classmethod
+    def validate_text(cls, value):
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Text cannot be empty or contain only spaces."
+            )
+
+        return value
 
 
 class OfficerCreate(BaseModel):
@@ -227,19 +287,6 @@ class UserLogin(BaseModel):
     email: str
 
     password: str
-
-
-def get_db():
-
-    db = SessionLocal()
-
-    try:
-
-        yield db
-
-    finally:
-
-        db.close()
 
 
 @app.post("/register")
@@ -421,10 +468,10 @@ def create_complaint(
     )
 
     if not city:
-        return {
-            "success": False,
-            "message": "Invalid city."
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid city."
+        )
 
     # Check issue category
     category = (
@@ -436,17 +483,17 @@ def create_complaint(
     )
 
     if not category:
-        return {
-            "success": False,
-            "message": "Invalid issue category."
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid issue category."
+        )
 
     department_id = category.department_id
 
     complaint_id = (
         "CR-"
         + datetime.now().strftime(
-            "%Y%m%d%H%M%S"
+            "%Y%m%d%H%M%S%f"
         )
     )
 
@@ -467,20 +514,29 @@ def create_complaint(
         user_id=user_id
     )
 
-    db.add(new_complaint)
-    db.commit()
-    db.refresh(new_complaint)
-
     history = ComplaintHistory(
-        complaint_id=new_complaint.id,
+        complaint=new_complaint,
         old_status=None,
         new_status="Submitted",
         remarks="Complaint submitted by citizen.",
         changed_by="Citizen"
     )
 
+    db.add(new_complaint)
     db.add(history)
-    db.commit()
+
+    try:
+        db.commit()
+
+    except IntegrityError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create complaint."
+        )
+
+    db.refresh(new_complaint)
 
     return {
         "success": True,
@@ -644,11 +700,10 @@ def get_complaint(
     )
 
     if not complaint:
-
-        return {
-            "success": False,
-            "message": "Complaint not found."
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Complaint not found."
+        )
 
     return {
         "success": True,
@@ -763,6 +818,13 @@ def update_complaint_status(
 
     old_status = complaint.status
     new_status = status_update.status
+
+    if old_status == new_status:
+        raise HTTPException(
+            status_code=400,
+            detail="Complaint is already in this status."
+        )
+
     complaint.status = new_status
 
     remarks = (
@@ -813,27 +875,15 @@ def get_complaint_history(
 
 
     if not complaint:
-
-        return {
-
-            "success": False,
-
-            "message":
-                "Complaint not found."
-
-        }
-
-
-    history = (
-        db.query(ComplaintHistory)
-        .filter(
-            ComplaintHistory.complaint_id ==
-            complaint.id
+        raise HTTPException(
+            status_code=404,
+            detail="Complaint not found."
         )
-        .order_by(
-            ComplaintHistory.created_at.asc()
-        )
-        .all()
+
+
+    history = sorted(
+        complaint.history,
+        key=lambda item: item.created_at
     )
 
 
@@ -853,9 +903,6 @@ def get_complaint_history(
 
                 "remarks":
                     item.remarks,
-
-                "changed_by":
-                    item.changed_by,
 
                 "created_at":
                     item.created_at
@@ -1124,17 +1171,41 @@ def update_officer_status(
     )
 
     if not officer:
-        return {
-            "success": False,
-            "message": "Officer not found."
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Officer not found."
+        )
 
     if officer.is_active == "true":
-        officer.is_active = "false"
+        new_status = "false"
     else:
-        officer.is_active = "true"
+        new_status = "true"
 
-    db.commit()
+    officer.is_active = new_status
+
+    if officer.user_id:
+        user = (
+            db.query(User)
+            .filter(
+                User.id == officer.user_id
+            )
+            .first()
+        )
+
+        if user:
+            user.is_active = new_status
+
+    try:
+        db.commit()
+
+    except IntegrityError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update officer status."
+        )
+
     db.refresh(officer)
 
     return {
