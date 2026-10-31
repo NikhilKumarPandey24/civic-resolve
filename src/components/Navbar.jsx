@@ -1,13 +1,13 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 function Navbar() {
   const navigate = useNavigate()
-
+  const [menuOpen, setMenuOpen] = useState(false)
   const token = localStorage.getItem('access_token')
   const userData = localStorage.getItem('user')
 
   let user = null
-
   try {
     user = userData ? JSON.parse(userData) : null
   } catch {
@@ -15,118 +15,58 @@ function Navbar() {
   }
 
   const handleLogout = () => {
-    const confirmed = window.confirm(
-      'Are you sure you want to logout?'
-    )
-
-    if (!confirmed) {
-      return
-    }
-
+    if (!window.confirm('Are you sure you want to logout?')) return
     localStorage.removeItem('access_token')
     localStorage.removeItem('user')
-
     navigate('/login')
   }
 
+  const closeMenu = () => setMenuOpen(false)
+  const navLink = 'nav-link'
+  const canReport = !user || user.role === 'citizen'
+
   return (
-    <nav className="bg-blue-700 text-white">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-        <Link to="/" className="text-2xl font-bold">
-          CivicResolve
+    <header className="site-header">
+      <nav className="site-nav" aria-label="Main navigation">
+        <Link to="/" className="brand" onClick={closeMenu} aria-label="CivicResolve home">
+          <span className="brand-mark" aria-hidden="true">C</span>
+          <span>Civic<span className="brand-accent">Resolve</span><small>PUBLIC SERVICE PORTAL</small></span>
         </Link>
 
-        <div className="flex items-center gap-6">
-          <Link
-            to="/"
-            className="hover:text-blue-200"
-          >
-            Home
-          </Link>
+        <button
+          type="button"
+          className="menu-toggle"
+          aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <span /><span /><span />
+        </button>
 
-          <Link
-            to="/report"
-            className="hover:text-blue-200"
-          >
-            Report Issue
-          </Link>
-
-          <Link
-            to="/track"
-            className="hover:text-blue-200"
-          >
-            Track Complaint
-          </Link>
-
-          {user?.role === 'citizen' && (
-            <>
-              <Link
-                to="/citizen"
-                className="hover:text-blue-200"
-              >
-                Dashboard
-              </Link>
-
-              <Link
-                to="/my-complaints"
-                className="hover:text-blue-200"
-              >
-                My Complaints
-              </Link>
-            </>
-          )}
-
-          {user?.role === 'officer' && (
-            <Link
-              to="/officer"
-              className="hover:text-blue-200"
-            >
-              Officer
-            </Link>
-          )}
-
-          {user?.role === 'admin' && (
-            <>
-              <Link
-                to="/admin"
-                className="hover:text-blue-200"
-              >
-                Admin
-              </Link>
-
-              <Link
-                to="/admin/officers"
-                className="hover:text-blue-200"
-              >
-                Officers
-              </Link>
-            </>
-          )}
-
-          {token && user ? (
-            <>
-              <span className="hidden text-sm text-blue-100 md:block">
-                {user.name}
-              </span>
-
-              <button
-                onClick={handleLogout}
-                className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
-              >
-                Logout
-              </button>
-            </>
-          ) : (
-            <Link
-              to="/login"
-              className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
-            >
-              Login
-            </Link>
-          )}
+        <div className={`nav-content${menuOpen ? ' is-open' : ''}`}>
+          <div className="nav-main-links">
+            <Link to="/" className={navLink} onClick={closeMenu}>Home</Link>
+            {canReport && <Link to="/report" className={navLink} onClick={closeMenu}>Report an issue</Link>}
+            <Link to="/track" className={navLink} onClick={closeMenu}>Track complaint</Link>
+            {user?.role === 'citizen' && <>
+              <Link to="/citizen" className={navLink} onClick={closeMenu}>Dashboard</Link>
+              <Link to="/my-complaints" className={navLink} onClick={closeMenu}>My complaints</Link>
+            </>}
+            {user?.role === 'officer' && <Link to="/officer" className={navLink} onClick={closeMenu}>Officer portal</Link>}
+            {user?.role === 'admin' && <>
+              <Link to="/admin" className={navLink} onClick={closeMenu}>Admin</Link>
+              <Link to="/admin/officers" className={navLink} onClick={closeMenu}>Officers</Link>
+            </>}
+          </div>
+          <div className="nav-account">
+            {token && user ? <>
+              <span className="nav-user"><span className="nav-user-dot" />{user.name}</span>
+              <button type="button" onClick={handleLogout} className="nav-action nav-action-muted">Log out</button>
+            </> : <Link to="/login" onClick={closeMenu} className="nav-action">Sign in <span aria-hidden="true">→</span></Link>}
+          </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+    </header>
   )
 }
 

@@ -1,15 +1,26 @@
+from __future__ import annotations
+
+import json
 import os
+import secrets
+import warnings
+from email.parser import BytesParser
+from email.policy import default as email_policy
+from io import BytesIO
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Security
+from fastapi import Request
+from fastapi.responses import FileResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.security import HTTPAuthorizationCredentials
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from dotenv import load_dotenv
 from passlib.context import CryptContext
@@ -23,6 +34,7 @@ from database import SessionLocal
 from database import Base
 
 from models import Complaint
+from models import ComplaintImage
 from models import City
 from models import Department
 from models import IssueCategory
@@ -33,6 +45,10 @@ from models import User
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
+
+from PIL import Image
+from PIL import ImageOps
+from PIL import UnidentifiedImageError
 
 
 pwd_context = CryptContext(
@@ -49,6 +65,22 @@ if not SECRET_KEY:
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+MAX_COMPLAINT_IMAGES = 5
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_TOTAL_IMAGE_BYTES = MAX_COMPLAINT_IMAGES * MAX_IMAGE_BYTES
+MAX_MULTIPART_REQUEST_BYTES = MAX_TOTAL_IMAGE_BYTES + 64 * 1024
+MAX_JSON_REQUEST_BYTES = 64 * 1024
+MAX_IMAGE_PIXELS = 25_000_000
+UPLOAD_DIR = Path(os.getenv(
+    "COMPLAINT_IMAGE_DIR",
+    str(Path(__file__).resolve().parent / "uploads" / "complaints")
+)).resolve()
+
+IMAGE_FORMATS = {
+    "JPEG": ("image/jpeg", ".jpg"),
+    "PNG": ("image/png", ".png"),
+    "WEBP": ("image/webp", ".webp"),
+}
 
 
 def create_access_token(data: dict):
@@ -197,6 +229,201 @@ def require_officer(
     return current_user
 
 
+async def read_limited_body(request: Request, limit: int) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > limit:
+                raise HTTPException(status_code=413, detail="The upload is too large.")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid content length.")
+
+    chunks = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(status_code=413, detail="The upload is too large.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def normalize_uploaded_image(image_bytes: bytes) -> tuple[bytes, str, str]:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(image_bytes)) as source:
+                image_format = source.format
+                if image_format not in IMAGE_FORMATS:
+                    raise HTTPException(
+                        status_code=415,
+                        detail="Use JPEG, PNG, or WebP images only."
+                    )
+                if source.width * source.height > MAX_IMAGE_PIXELS:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Images must be 25 megapixels or smaller."
+                    )
+                if getattr(source, "n_frames", 1) != 1:
+                    raise HTTPException(
+                        status_code=415,
+                        detail="Animated images are not supported."
+                    )
+                source.verify()
+
+            with Image.open(BytesIO(image_bytes)) as source:
+                image = ImageOps.exif_transpose(source)
+                has_alpha = "A" in image.getbands()
+                if image_format == "JPEG":
+                    image = image.convert("RGB")
+                else:
+                    image = image.convert("RGBA" if has_alpha else "RGB")
+
+                output = BytesIO()
+                if image_format == "JPEG":
+                    image.save(output, format="JPEG", quality=90, optimize=True, progressive=True)
+                elif image_format == "PNG":
+                    image.save(output, format="PNG", optimize=True)
+                else:
+                    image.save(output, format="WEBP", quality=90, method=4)
+
+        normalized = output.getvalue()
+        if len(normalized) > MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Each processed image must be 5 MB or smaller."
+            )
+        content_type, extension = IMAGE_FORMATS[image_format]
+        return normalized, content_type, extension
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="One of the uploaded files is not a valid supported image."
+        )
+
+
+async def parse_complaint_submission(request: Request) -> tuple[ComplaintCreate, list[tuple[bytes, str, str]]]:
+    content_type = request.headers.get("content-type", "").lower()
+
+    if content_type.startswith("application/json"):
+        body = await read_limited_body(request, MAX_JSON_REQUEST_BYTES)
+        try:
+            complaint_data = ComplaintCreate.model_validate(json.loads(body))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(status_code=400, detail="Invalid JSON request body.")
+        except ValidationError as error:
+            raise HTTPException(
+                status_code=422,
+                detail=[
+                    {"loc": item["loc"], "msg": item["msg"], "type": item["type"]}
+                    for item in error.errors()
+                ]
+            )
+        return complaint_data, []
+
+    if not content_type.startswith("multipart/form-data"):
+        raise HTTPException(
+            status_code=415,
+            detail="Submit complaint data as JSON or multipart form data."
+        )
+
+    body = await read_limited_body(request, MAX_MULTIPART_REQUEST_BYTES)
+    envelope = (
+        f"Content-Type: {request.headers.get('content-type')}\r\n"
+        "MIME-Version: 1.0\r\n\r\n"
+    ).encode("ascii", errors="strict") + body
+    parsed = BytesParser(policy=email_policy).parsebytes(envelope)
+    if not parsed.is_multipart() or parsed.defects:
+        raise HTTPException(status_code=400, detail="Invalid multipart request.")
+
+    fields = {}
+    image_parts = []
+    allowed_fields = {
+        "city_id", "category_id", "title", "description",
+        "location_address", "latitude", "longitude", "images"
+    }
+
+    for part in parsed.iter_parts():
+        field_name = part.get_param("name", header="content-disposition")
+        if part.get_content_disposition() != "form-data" or not field_name:
+            raise HTTPException(status_code=400, detail="Invalid multipart field.")
+        if field_name not in allowed_fields:
+            raise HTTPException(status_code=400, detail="Unexpected complaint field.")
+
+        payload = part.get_payload(decode=True) or b""
+        filename = part.get_filename()
+        if field_name == "images":
+            if not filename and not payload:
+                continue
+            if not filename:
+                raise HTTPException(status_code=400, detail="An uploaded image is missing its filename.")
+            if len(image_parts) >= MAX_COMPLAINT_IMAGES:
+                raise HTTPException(status_code=413, detail="You can attach up to five images per complaint.")
+            if len(payload) > MAX_IMAGE_BYTES:
+                raise HTTPException(status_code=413, detail="Each image must be 5 MB or smaller.")
+            if not payload:
+                raise HTTPException(status_code=400, detail="An uploaded image is empty.")
+            image_parts.append(normalize_uploaded_image(payload))
+            continue
+
+        if filename is not None:
+            raise HTTPException(status_code=400, detail="Only image files may be uploaded.")
+        if field_name in fields:
+            raise HTTPException(status_code=400, detail="Complaint fields must not be repeated.")
+        if len(payload) > 12 * 1024:
+            raise HTTPException(status_code=413, detail="A complaint field is too large.")
+        try:
+            fields[field_name] = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="Complaint text must use UTF-8 encoding.")
+
+    try:
+        complaint_data = ComplaintCreate.model_validate(fields)
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=[
+                {"loc": item["loc"], "msg": item["msg"], "type": item["type"]}
+                for item in error.errors()
+            ]
+        )
+    return complaint_data, image_parts
+
+
+def get_complaint_for_media_access(
+    complaint_id: str,
+    current_user: dict | None,
+    db: Session
+) -> Complaint:
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated.")
+
+    complaint = db.query(Complaint).filter(
+        Complaint.complaint_id == complaint_id
+    ).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found.")
+
+    role = current_user["role"]
+    if role == "admin":
+        return complaint
+    if role == "citizen":
+        if complaint.user_id != current_user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only view images for your own complaints.")
+        return complaint
+    if role == "officer":
+        officer = db.query(Officer).filter(
+            Officer.user_id == current_user["user_id"]
+        ).first()
+        if not officer or complaint.officer_id != officer.id:
+            raise HTTPException(status_code=403, detail="You can only view images for complaints assigned to you.")
+        return complaint
+
+    raise HTTPException(status_code=403, detail="You are not authorized to view complaint images.")
+
+
 # Create database tables
 Base.metadata.create_all(
     bind=engine
@@ -245,6 +472,25 @@ class ComplaintCreate(BaseModel):
         max_length=2000
     )
 
+    location_address: str | None = Field(
+        default=None,
+        max_length=250
+    )
+
+    latitude: float | None = Field(
+        default=None,
+        ge=-90,
+        le=90,
+        allow_inf_nan=False
+    )
+
+    longitude: float | None = Field(
+        default=None,
+        ge=-180,
+        le=180,
+        allow_inf_nan=False
+    )
+
     @field_validator("title", "description")
     @classmethod
     def validate_text(cls, value):
@@ -256,6 +502,20 @@ class ComplaintCreate(BaseModel):
             )
 
         return value
+
+    @field_validator("location_address")
+    @classmethod
+    def normalize_location_address(cls, value):
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def validate_coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("Latitude and longitude must be provided together.")
+        return self
 
 
 class OfficerCreate(BaseModel):
@@ -453,11 +713,19 @@ def home():
 
 
 @app.post("/complaints")
-def create_complaint(
-    complaint: ComplaintCreate,
+async def create_complaint(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict | None = Depends(get_current_user)
 ):
+    if current_user and current_user.get("role") != "citizen":
+        raise HTTPException(
+            status_code=403,
+            detail="Only citizen accounts can submit complaints."
+        )
+
+    complaint, image_parts = await parse_complaint_submission(request)
+
     # Check city
     city = (
         db.query(City)
@@ -510,6 +778,9 @@ def create_complaint(
         category_id=complaint.category_id,
         title=complaint.title,
         description=complaint.description,
+        location_address=complaint.location_address,
+        latitude=complaint.latitude,
+        longitude=complaint.longitude,
         status="Submitted",
         user_id=user_id
     )
@@ -525,16 +796,49 @@ def create_complaint(
     db.add(new_complaint)
     db.add(history)
 
+    complaint_directory = UPLOAD_DIR / complaint_id
+    saved_files = []
+    created_directory = False
+
     try:
+        if image_parts:
+            complaint_directory.mkdir(parents=True, exist_ok=False)
+            created_directory = True
+
+            for image_bytes, content_type, extension in image_parts:
+                storage_name = f"{secrets.token_hex(24)}{extension}"
+                image_path = complaint_directory / storage_name
+                saved_files.append(image_path)
+                with image_path.open("xb") as image_file:
+                    image_file.write(image_bytes)
+                db.add(ComplaintImage(
+                    complaint=new_complaint,
+                    storage_name=storage_name,
+                    content_type=content_type,
+                    size_bytes=len(image_bytes)
+                ))
+
         db.commit()
 
     except IntegrityError:
         db.rollback()
+        for image_path in saved_files:
+            image_path.unlink(missing_ok=True)
+        if created_directory:
+            complaint_directory.rmdir()
 
         raise HTTPException(
             status_code=500,
             detail="Failed to create complaint."
         )
+
+    except Exception:
+        db.rollback()
+        for image_path in saved_files:
+            image_path.unlink(missing_ok=True)
+        if created_directory and complaint_directory.exists():
+            complaint_directory.rmdir()
+        raise
 
     db.refresh(new_complaint)
 
@@ -551,8 +855,66 @@ def create_complaint(
         "message":
             "Complaint submitted successfully!",
         "status":
-            new_complaint.status
+            new_complaint.status,
+        "image_count":
+            len(image_parts)
     }
+
+
+@app.get("/complaints/{complaint_id}/images")
+def get_complaint_images(
+    complaint_id: str,
+    current_user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    complaint = get_complaint_for_media_access(complaint_id, current_user, db)
+    return [
+        {
+            "id": image.id,
+            "content_type": image.content_type,
+            "size_bytes": image.size_bytes,
+            "url": f"/complaints/{complaint_id}/images/{image.id}"
+        }
+        for image in complaint.images
+    ]
+
+
+@app.get("/complaints/{complaint_id}/images/{image_id}")
+def get_complaint_image(
+    complaint_id: str,
+    image_id: int,
+    current_user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    complaint = get_complaint_for_media_access(complaint_id, current_user, db)
+    image = db.query(ComplaintImage).filter(
+        ComplaintImage.id == image_id,
+        ComplaintImage.complaint_id == complaint.id
+    ).first()
+    if not image or Path(image.storage_name).name != image.storage_name:
+        raise HTTPException(status_code=404, detail="Complaint image not found.")
+
+    extension = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp"
+    }.get(image.content_type)
+    if not extension:
+        raise HTTPException(status_code=404, detail="Complaint image not found.")
+
+    image_path = UPLOAD_DIR / complaint.complaint_id / image.storage_name
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Complaint image file not found.")
+
+    return FileResponse(
+        image_path,
+        media_type=image.content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="complaint-image{extension}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff"
+        }
+    )
 
 
 @app.get("/complaints")
@@ -744,6 +1106,15 @@ def get_complaint(
 
         "description":
             complaint.description,
+
+        "location_address":
+            complaint.location_address,
+
+        "latitude":
+            complaint.latitude,
+
+        "longitude":
+            complaint.longitude,
 
         "status":
             complaint.status,
@@ -949,6 +1320,9 @@ def get_my_complaints(
             "complaint_id": complaint.complaint_id,
             "title": complaint.title,
             "description": complaint.description,
+            "location_address": complaint.location_address,
+            "latitude": complaint.latitude,
+            "longitude": complaint.longitude,
             "status": complaint.status,
             "city": complaint.city.name,
             "category": complaint.category.name,
@@ -1340,6 +1714,9 @@ def get_officer_complaints(
             "complaint_id": complaint.complaint_id,
             "title": complaint.title,
             "description": complaint.description,
+            "location_address": complaint.location_address,
+            "latitude": complaint.latitude,
+            "longitude": complaint.longitude,
             "status": complaint.status,
             "city": complaint.city.name,
             "category": complaint.category.name,
@@ -1502,6 +1879,15 @@ def get_admin_complaints(
 
                 "status":
                     complaint.status,
+
+                "location_address":
+                    complaint.location_address,
+
+                "latitude":
+                    complaint.latitude,
+
+                "longitude":
+                    complaint.longitude,
 
                 "city":
                     complaint.city.name,

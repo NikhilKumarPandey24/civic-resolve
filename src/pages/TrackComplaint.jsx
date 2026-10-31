@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import ComplaintDescription from '../components/ComplaintDescription'
 
 function TrackComplaint() {
 
@@ -358,15 +359,12 @@ function TrackComplaint() {
                 {/* DESCRIPTION */}
 
                 <div className="md:col-span-2">
-
-                  <p className="text-sm font-medium text-slate-500">
-                    Description
-                  </p>
-
-                  <div className="mt-2 rounded-xl bg-slate-50 p-4 text-slate-700">
-                    {complaint.description}
-                  </div>
-
+                  <ComplaintDescription
+                    description={complaint.description}
+                    locationAddress={complaint.location_address}
+                    latitude={complaint.latitude}
+                    longitude={complaint.longitude}
+                  />
                 </div>
 
               </div>

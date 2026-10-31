@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import ComplaintDescription from '../components/ComplaintDescription'
 
 function OfficerDashboard() {
   const [complaints, setComplaints] = useState([])
@@ -256,9 +257,15 @@ function OfficerDashboard() {
                             {complaint.title}
                           </h3>
 
-                          <p className="mt-2 text-sm text-slate-600">
-                            {complaint.description}
-                          </p>
+                          <div className="mt-2">
+                            <ComplaintDescription
+                              description={complaint.description}
+                              locationAddress={complaint.location_address}
+                              latitude={complaint.latitude}
+                              longitude={complaint.longitude}
+                              compact
+                            />
+                          </div>
 
                           <div className="mt-3 flex flex-wrap gap-2 text-xs">
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">

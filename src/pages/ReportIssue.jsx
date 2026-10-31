@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 function ReportIssue() {
 
@@ -10,10 +10,103 @@ function ReportIssue() {
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [locationText, setLocationText] = useState('')
+  const [coordinates, setCoordinates] = useState(null)
+  const [locationAccuracy, setLocationAccuracy] = useState(null)
+  const [locating, setLocating] = useState(false)
+  const [locationMessage, setLocationMessage] = useState('')
+  const [selectedImages, setSelectedImages] = useState([])
+  const nextImageId = useRef(0)
+  const imagePreviewUrls = useRef(new Set())
 
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
   const user = JSON.parse(localStorage.getItem('user') || 'null')
+
+  const descriptionLimit = 2000
+
+  useEffect(() => () => {
+    imagePreviewUrls.current.forEach((url) => URL.revokeObjectURL(url))
+    imagePreviewUrls.current.clear()
+  }, [])
+
+  function handleImageSelection(event) {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    setMessage('')
+
+    if (selectedImages.length + files.length > 5) {
+      setMessage('You can attach up to five photos to a complaint.')
+      return
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+    const invalidType = files.find((file) => !allowedTypes.includes(file.type))
+    if (invalidType) {
+      setMessage('Choose JPEG, PNG, or WebP images only.')
+      return
+    }
+
+    const oversizedFile = files.find((file) => file.size > 5 * 1024 * 1024)
+    if (oversizedFile) {
+      setMessage('Each photo must be 5 MB or smaller.')
+      return
+    }
+
+    const additions = files.map((file) => {
+      const preview = URL.createObjectURL(file)
+      imagePreviewUrls.current.add(preview)
+      return { id: nextImageId.current++, file, preview }
+    })
+    setSelectedImages((current) => [...current, ...additions])
+  }
+
+  function removeSelectedImage(imageId) {
+    setSelectedImages((current) => {
+      const image = current.find((item) => item.id === imageId)
+      if (image) {
+        URL.revokeObjectURL(image.preview)
+        imagePreviewUrls.current.delete(image.preview)
+      }
+      return current.filter((item) => item.id !== imageId)
+    })
+  }
+
+  function clearSelectedImages() {
+    selectedImages.forEach((image) => {
+      URL.revokeObjectURL(image.preview)
+      imagePreviewUrls.current.delete(image.preview)
+    })
+    setSelectedImages([])
+  }
+
+  function useMyLocation() {
+    setLocationMessage('')
+    if (!navigator.geolocation) {
+      setLocationMessage('Your browser may not allow location access on this connection. Location requires HTTPS or localhost. Enter a nearby street, address, or landmark instead.')
+      return
+    }
+
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCoordinates({ latitude: position.coords.latitude, longitude: position.coords.longitude })
+        setLocationAccuracy(position.coords.accuracy)
+        setLocationMessage('Location added. Please check the map pin is near the issue.')
+        setLocating(false)
+      },
+      (error) => {
+        const messages = {
+          1: 'Location permission was denied. Allow location access in your browser, or enter a nearby address or landmark.',
+          2: 'Your location could not be determined. Try again outdoors or enter a nearby address or landmark.',
+          3: 'Getting your location took too long. Try again or enter a nearby address or landmark.'
+        }
+        setLocationMessage(messages[error.code] || 'Unable to get your location. Enter a nearby address or landmark instead.')
+        setLocating(false)
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 }
+    )
+  }
 
   useEffect(() => {
 
@@ -73,10 +166,15 @@ function ReportIssue() {
 
     setMessage('')
 
-    if (!cityId || !categoryId || !title || !description) {
+    if (!cityId || !categoryId || !title.trim() || !description.trim()) {
 
       setMessage('Please fill all required fields.')
 
+      return
+    }
+
+    if (description.trim().length > 2000) {
+      setMessage('The description must be 2,000 characters or fewer.')
       return
     }
 
@@ -86,39 +184,43 @@ function ReportIssue() {
 
       const token = localStorage.getItem('access_token')
 
-      const response = await fetch(
-        'http://localhost:8000/complaints',
-        {
-          method: 'POST',
+      const complaintData = {
+        city_id: Number(cityId),
+        category_id: Number(categoryId),
+        title: title.trim(),
+        description: description.trim(),
+        location_address: locationText.trim() || null,
+        latitude: coordinates?.latitude ?? null,
+        longitude: coordinates?.longitude ?? null
+      }
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+      let body
 
-          headers: {
-            'Content-Type': 'application/json',
+      if (selectedImages.length) {
+        body = new FormData()
+        Object.entries(complaintData).forEach(([key, value]) => {
+          if (value !== null) body.append(key, String(value))
+        })
+        selectedImages.forEach(({ file }) => body.append('images', file, file.name))
+      } else {
+        headers['Content-Type'] = 'application/json'
+        body = JSON.stringify(complaintData)
+      }
 
-            ...(token
-              ? {
-                  Authorization: `Bearer ${token}`
-                }
-              : {})
-          },
-
-          body: JSON.stringify({
-            city_id: Number(cityId),
-            category_id: Number(categoryId),
-            title: title,
-            description: description
-          })
-        }
-      )
+      const response = await fetch('http://localhost:8000/complaints', {
+        method: 'POST',
+        headers,
+        body
+      })
 
       if (!response.ok) {
 
         const errorData = await response.json().catch(() => null)
 
-        setMessage(
-          errorData?.detail ||
-          errorData?.message ||
-          'Failed to submit complaint.'
-        )
+        const detail = errorData?.detail
+        setMessage(Array.isArray(detail)
+          ? detail.map((item) => item.msg).join(' ')
+          : detail || errorData?.message || 'Failed to submit complaint.')
 
         return
 
@@ -130,13 +232,18 @@ function ReportIssue() {
       if (data.success) {
 
         setMessage(
-          `Complaint submitted successfully! Complaint ID: ${data.complaint_id}`
+          `Complaint submitted successfully${data.image_count ? ` with ${data.image_count} ${data.image_count === 1 ? 'photo' : 'photos'}` : ''}! Complaint ID: ${data.complaint_id}`
         )
 
         setTitle('')
         setDescription('')
         setCityId('')
         setCategoryId('')
+        setLocationText('')
+        setCoordinates(null)
+        setLocationAccuracy(null)
+        setLocationMessage('')
+        clearSelectedImages()
 
       } else {
 
@@ -337,6 +444,7 @@ function ReportIssue() {
 
               <textarea
                 rows="6"
+                maxLength={descriptionLimit}
                 value={description}
                 onChange={(event) =>
                   setDescription(event.target.value)
@@ -346,7 +454,7 @@ function ReportIssue() {
               />
 
               <p className="mt-2 text-sm text-slate-500">
-                More details help the responsible department understand the problem.
+                More details help the responsible department understand the problem. {description.length}/{descriptionLimit}
               </p>
 
             </div>
@@ -357,7 +465,7 @@ function ReportIssue() {
             <div>
 
               <label className="mb-2 block text-sm font-semibold text-slate-700">
-                Upload Photo
+                Upload Photos <span className="font-normal text-slate-500">(optional, up to 5)</span>
               </label>
 
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center">
@@ -368,18 +476,34 @@ function ReportIssue() {
 
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={handleImageSelection}
                   className="mx-auto block max-w-full text-sm text-slate-600"
                 />
 
                 <p className="mt-2 text-sm text-slate-500">
-                  Upload a clear photo of the civic problem.
+                  Add clear JPEG, PNG, or WebP photos. Each photo must be 5 MB or smaller.
                 </p>
 
               </div>
 
             </div>
 
+
+            {selectedImages.length > 0 && (
+              <div className="selected-image-grid" aria-live="polite">
+                {selectedImages.map((image, index) => (
+                  <figure className="selected-image-card" key={image.id}>
+                    <img src={image.preview} alt={`Preview of selected photo ${index + 1}`} />
+                    <figcaption>
+                      <span title={image.file.name}>{image.file.name}</span>
+                      <button type="button" onClick={() => removeSelectedImage(image.id)} aria-label={`Remove ${image.file.name}`}>Remove</button>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
 
             {/* LOCATION */}
 
@@ -396,13 +520,13 @@ function ReportIssue() {
                     </span>
 
                     <h3 className="font-bold text-slate-800">
-                      Issue Location
+                      Where is the issue?
                     </h3>
 
                   </div>
 
                   <p className="mt-1 text-sm text-slate-600">
-                    Location support will help identify the exact place of the issue.
+                    Add a nearby address or landmark, or pin your current location on the map.
                   </p>
 
                 </div>
@@ -410,12 +534,51 @@ function ReportIssue() {
 
                 <button
                   type="button"
+                  onClick={useMyLocation}
+                  disabled={locating}
                   className="rounded-xl border border-blue-600 bg-white px-5 py-3 font-semibold text-blue-700 transition hover:bg-blue-600 hover:text-white"
                 >
-                  Use My Location
+                  {locating ? 'Finding location…' : coordinates ? 'Update my location' : 'Use my location'}
                 </button>
 
               </div>
+
+              <div className="mt-5">
+                <label htmlFor="location-description" className="mb-2 block text-sm font-semibold text-slate-700">
+                  Nearby address, street, or landmark <span className="font-normal text-slate-500">(optional)</span>
+                </label>
+                <input
+                  id="location-description"
+                  type="text"
+                  maxLength={250}
+                  value={locationText}
+                  onChange={(event) => setLocationText(event.target.value)}
+                  placeholder="e.g. Outside the library on Park Street"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                />
+              </div>
+
+              {coordinates && (
+                <div className="location-result" role="status">
+                  <span className="location-pin" aria-hidden="true">●</span>
+                  <div className="location-result-copy">
+                    <strong>Map pin added</strong>
+                    <span>{coordinates.latitude.toFixed(5)}, {coordinates.longitude.toFixed(5)}{locationAccuracy ? ` · accurate to about ${Math.round(locationAccuracy)} m` : ''}</span>
+                  </div>
+                  <a
+                    className="location-map-link"
+                    href={`https://www.openstreetmap.org/?mlat=${coordinates.latitude}&mlon=${coordinates.longitude}#map=18/${coordinates.latitude}/${coordinates.longitude}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >View map ↗</a>
+                  <button type="button" className="location-clear" onClick={() => { setCoordinates(null); setLocationAccuracy(null) }} aria-label="Remove map pin">Remove</button>
+                </div>
+              )}
+
+              {locationMessage && <p className="mt-3 text-sm text-slate-600" role="status">{locationMessage}</p>}
+              <p className="mt-3 text-xs leading-5 text-slate-600">
+                Location is optional. Any address or map coordinates you add become part of the complaint details and can be seen by people with its tracking reference.
+              </p>
 
             </div>
 

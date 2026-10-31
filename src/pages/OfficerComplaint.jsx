@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import ComplaintDescription from '../components/ComplaintDescription'
+import ComplaintImages from '../components/ComplaintImages'
 
 
 function OfficerComplaint() {
@@ -443,21 +445,20 @@ function OfficerComplaint() {
 
 
                 <div className="sm:col-span-2">
-
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Description
-                  </p>
-
-                  <div className="mt-2 rounded-xl bg-slate-50 p-5 leading-relaxed text-slate-700">
-                    {complaint.description}
-                  </div>
-
+                  <ComplaintDescription
+                    description={complaint.description}
+                    locationAddress={complaint.location_address}
+                    latitude={complaint.latitude}
+                    longitude={complaint.longitude}
+                  />
                 </div>
 
               </div>
 
             </div>
 
+
+            <ComplaintImages complaintId={complaint.complaint_id} />
 
             {/* COMPLAINT HISTORY */}
 

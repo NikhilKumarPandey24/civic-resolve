@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import ComplaintDescription from '../components/ComplaintDescription'
+import ComplaintImages from '../components/ComplaintImages'
 
 function AdminComplaint() {
   const token = localStorage.getItem('access_token')
@@ -326,19 +328,18 @@ function AdminComplaint() {
                 </div>
 
                 <div>
-                  <p className="text-sm font-semibold text-gray-500 mb-2">
-                    Description
-                  </p>
-
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
-                    <p className="text-gray-700 leading-7 whitespace-pre-wrap">
-                      {complaint.description}
-                    </p>
-                  </div>
+                  <ComplaintDescription
+                    description={complaint.description}
+                    locationAddress={complaint.location_address}
+                    latitude={complaint.latitude}
+                    longitude={complaint.longitude}
+                  />
                 </div>
 
               </div>
             </section>
+
+            <ComplaintImages complaintId={complaint.complaint_id} />
 
             {/* History */}
             <section className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">

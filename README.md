@@ -24,3 +24,13 @@ Role: admin
 
 Email: rahul.sharma@civicresolve.com
 Password: configure locally; do not commit credentials
+
+for backend
+venv/scripts/activate
+cd backend
+uvicorn main:app --reload
+
+
+for frontend
+venv/scripts/activate
+npm run dev

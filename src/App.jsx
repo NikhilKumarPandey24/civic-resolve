@@ -1,5 +1,5 @@
 import './App.css'
-import { Routes, Route, Link } from 'react-router-dom'
+import { Routes, Route, Link, Navigate, useLocation } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import Home from './pages/Home'
 import Navbar from './components/Navbar'
@@ -15,6 +15,22 @@ import AdminDashboard from './pages/AdminDashboard'
 import AdminComplaint from './pages/AdminComplaint'
 import AdminOfficers from './pages/AdminOfficers'
 import NotFound from './pages/NotFound'
+
+function ReportAccess({ children }) {
+  const token = localStorage.getItem('access_token')
+  let user = null
+  try {
+    user = JSON.parse(localStorage.getItem('user') || 'null')
+  } catch {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('user')
+  }
+
+  if (token && user?.role && user.role !== 'citizen') {
+    return <Navigate to={user.role === 'admin' ? '/admin' : '/officer'} replace />
+  }
+  return children
+}
 
 
 function LegacyHome() {
@@ -241,9 +257,11 @@ function LegacyHome() {
 }
 
 function App() {
+  const location = useLocation()
+
   return (
     <>
-      <Navbar />
+      {location.pathname !== '/login' && <Navbar />}
 
       <Routes>
         <Route
@@ -253,7 +271,7 @@ function App() {
 
         <Route
           path="/report"
-          element={<ReportIssue />}
+          element={<ReportAccess><ReportIssue /></ReportAccess>}
         />
 
         <Route
